@@ -105,19 +105,31 @@ MODULE_APEX_CONSCRYPT_NUM_DIR=$MODDIR/apex/$APEX_CONSCRYPT_NUM_NAME/cacerts
 TEMP_DIR=/mnt/instaler
 
 move_custom_cert() {
-    if [ "$(ls -A $CUSTOM_CERT_DIR)" ]; then
+    if [ -d "$CUSTOM_CERT_DIR" ] && [ -n "$(ls -A "$CUSTOM_CERT_DIR" 2>/dev/null)" ]; then
 
+        # 这个目录曾经是 0777（customize.sh 用 -m 777 创建，设备上实测确实是
+        # drwxrwxrwx）：任何应用都能往里投一张 CA，而这里的内容会被装进系统信任库
+        # —— 一条提权路径。这里收紧目录权限，并且只接受 root 拥有的文件。
+        chmod 700 "$CUSTOM_CERT_DIR" 2>/dev/null
+        _mc_installed=0
         for cert_file in "$CUSTOM_CERT_DIR"/*; do
             [ -f "$cert_file" ] || continue
+            _mc_owner=$(ls -n "$cert_file" 2>/dev/null | awk '{print $3}')
+            if [ "$_mc_owner" != "0" ]; then
+                print_log "SKIP $(basename "$cert_file"): not owned by root (uid=$_mc_owner)"
+                continue
+            fi
             byte=$(head -c1 "$cert_file" | od -An -tx1 | tr -d ' \n')
             if [ "$byte" != "30" ]; then
                 print_log "$(basename "$cert_file") is not a der certificate, needs encoding conversion, deleting it"
                 rm -f "$cert_file"
+                continue
             fi
+            cp -f "$cert_file" "$MODULE_CERT_DIR"
+            cp -f "$cert_file" "$USER_CERT_DIR"
+            _mc_installed=$((_mc_installed + 1))
         done
-
-        cp -f $CUSTOM_CERT_DIR/* $MODULE_CERT_DIR
-        cp -f $CUSTOM_CERT_DIR/* $USER_CERT_DIR
+        print_log "installed $_mc_installed certificate(s) from $CUSTOM_CERT_DIR"
     else
         print_log "The directory $CUSTOM_CERT_DIR is empty."
     fi
@@ -126,8 +138,10 @@ move_custom_cert() {
 
 fix_user_permissions() {
     # "Fix permissions of the system certificate directory"
+    # 644 而不是 666：证书不需要任何人可写（原值让这些文件 world-writable，
+    # 一旦路径可达就成了替换系统信任内容的入口）
     chown -R root:root $USER_CERT_DIR/
-    chmod -R 666 $USER_CERT_DIR/
+    chmod -R 644 $USER_CERT_DIR/
     chown system:system $USER_CERT_DIR
     chmod 755 $USER_CERT_DIR
     print_log "fix user certificate permissions status:$?"

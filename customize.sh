@@ -32,8 +32,14 @@ on_install() {
   if [ -f "$D_TMP_CERT" ]; then
     ui_print "- ${D_TMP_CERT} found"
   else
-    # ui_print "- create ${D_TMP_CERT}"
-    mkdir -p -m 777 "$D_TMP_CERT"
+    # 该目录曾经以 0777 创建：任何应用都能往里投一张证书，而 post-fs-data 会把
+    # 它装进系统信任库 —— 等于一条提权路径。现在是仅 root 可访问；若目录已存在
+    # （旧版本创建过）也顺手收紧权限。
+    if [ -d "$D_TMP_CERT" ]; then
+      chmod 700 "$D_TMP_CERT" 2>/dev/null
+    else
+      mkdir -p -m 700 "$D_TMP_CERT"
+    fi
   fi
   # ui_print "- mkdir $MODPATH/certificates"
   # ui_print "- mkdir $F_TARGETDIR"

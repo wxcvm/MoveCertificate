@@ -20,6 +20,15 @@ print_log "kernel su: $(command -v ksud || echo none) / magisk: $(command -v mag
 read_mode_config
 print_log "current mode is $CURRENT_MODE"
 
+# Android 16/17 + builtin 模式的已知严重风险（上游 issue #74）：模块树里的 apex/
+# 目录被 metamodule（Hybrid Mount / Mountify 等）overlay 到 /apex/com.android.conscrypt*
+# 会干扰 apexd 的 APEX 激活，触发 apexd-failed → 开机重启循环（内核 panic
+# "Attempted to kill init"），且只有禁用模块才能恢复。compatible 模式（默认）走
+# tmpfs + bind，实测在 Android 17 上正常。
+if [ "$sdk_version_number" -ge 36 ] && [ "$CURRENT_MODE" = "builtin" ]; then
+    print_log "WARNING: builtin mode on SDK $sdk_version_number can cause apexd-failed boot loops when a metamodule overlays the module's apex/ tree (upstream issue #74). Use mode=compatible."
+fi
+
 # 先探测 nsenter 写法（Android 17 自带 toybox，旧代码的 util-linux 写法容易静默失效）
 nsenter_probe
 

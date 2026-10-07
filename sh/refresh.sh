@@ -7,6 +7,12 @@ MODDIR=${0%/*}
 # 所以这里主动清空，保证当前生效的证书只来自 compatible 模式的挂载内容
 clean_builtin_leftovers() {
     if [ "$CURRENT_MODE" != "builtin" ]; then
+        # 变量为空时 "$MODULE_SYSTEM_CERT_DIR"/* 会展开成 /system/etc/security/cacerts/*
+        # 这类真实系统路径 —— 先确保 MODDIR 有效再删。
+        if [ -z "$MODDIR" ] || [ ! -d "$MODDIR" ]; then
+            print_log "skip leftover cleanup: MODDIR is not set/invalid"
+            return 0
+        fi
         rm -f "$MODULE_SYSTEM_CERT_DIR"/*
         rm -f "$MODULE_APEX_CONSCRYPT_DIR"/*
         rm -f "$MODULE_APEX_CONSCRYPT_NUM_DIR"/*
