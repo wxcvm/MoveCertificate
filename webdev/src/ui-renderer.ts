@@ -34,13 +34,12 @@ export function renderVersionInfo(containerId: string, lines: string[]): void {
 /**
  * 在页面上显示运行日志
  * 把 install.log 的内容逐行显示在指定区域
+ *
+ * 与 renderVersionInfo 是同一件事（都是把若干行文本原样写进容器），所以直接复用，
+ * 避免两份实现各自漂移（SonarCloud typescript:S4144 报的就是这个重复）。
  */
 export function renderLogInfo(containerId: string, lines: string[]): void {
-    const el = document.getElementById(containerId);
-    if (!el) return;
-
-    // 用 textContent 渲染，避免 HTML 拼接；容器样式已设置 white-space: pre-wrap，换行可正常显示
-    el.textContent = lines.join('\n');
+    renderVersionInfo(containerId, lines);
 }
 
 // ==================== 证书列表 ====================

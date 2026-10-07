@@ -33,7 +33,9 @@ jobs:
         run: rm -rf webdev/.parcel-cache
       
       - name: Install dependencies
-        run: cd webdev && npm install
+        # npm ci 而不是 npm install：严格按 package-lock.json 解析版本，并且跳过
+        # 依赖的安装脚本（SonarCloud githubactions:S8543 / S6505 —— 供应链风险）。
+        run: cd webdev && npm ci --ignore-scripts
       
       - name: Build web UI
         run: cd webdev && npm run build

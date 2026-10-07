@@ -181,7 +181,9 @@ async function serve() {
 // ==================== 启动 ====================
 
 if (isDev) {
-    serve();
+    // 顶层 await（.mjs 支持）：构建/监听失败时进程以非零码退出，而不是留下一个
+    // unhandled rejection 让 CI 看起来成功（SonarCloud javascript:S9383/S7785）。
+    await serve();
 } else {
-    build();
+    await build();
 }

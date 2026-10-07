@@ -134,8 +134,10 @@ function switchTab(tabName: TabName): void {
     // 2. 显示目标 Tab 页面（触发 CSS 进入动画）
     const targetPage = document.getElementById('tab-' + tabName);
     if (targetPage) {
-        // 强制回流后添加 active 类以触发动画
-        void targetPage.offsetWidth;
+        // 强制回流后再加 active 类以触发进入动画。读取布局属性本身就会触发回流，
+        // 用 getBoundingClientRect() 而不是 `void targetPage.offsetWidth`：后者
+        // 会被 typescript:S3735 判为不应使用的 void 运算符。
+        targetPage.getBoundingClientRect();
         targetPage.classList.add('active');
     }
 
@@ -412,13 +414,16 @@ window.onload = async (): Promise<void> => {
             // 各加载函数内部有"已加载则跳过"的判断，切换 Tab 不会重复请求
             switch (tabName) {
                 case 'certs':
-                    loadCertsTab();
+                    // 这些加载函数是 async：不接住异常就会变成 unhandled rejection
+                    // （SonarCloud typescript:S9383）；用 catch 而不是 void 是因为
+                    // S3735 禁止 void 运算符，两条规则在这里互相矛盾。
+                    loadCertsTab().catch(err => console.error('[MoveCertificate] 加载证书列表失败', err));
                     break;
                 case 'mode':
-                    loadModeTab();
+                    loadModeTab().catch(err => console.error('[MoveCertificate] 加载模式配置失败', err));
                     break;
                 case 'log':
-                    loadLogTab();
+                    loadLogTab().catch(err => console.error('[MoveCertificate] 加载日志失败', err));
                     break;
                 case 'settings':
                     // 设置页是纯静态的，不需要加载数据
@@ -441,5 +446,5 @@ window.onload = async (): Promise<void> => {
 
     // ==================== 默认加载证书管理页 ====================
     switchTab('certs');
-    loadCertsTab();
+    loadCertsTab().catch(err => console.error('[MoveCertificate] 首次加载证书列表失败', err));
 };
