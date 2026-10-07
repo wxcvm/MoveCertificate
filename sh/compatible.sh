@@ -32,6 +32,7 @@ init_low_version() {
         chcon -R $default_selinux_context $SYSTEM_CERT_DIR
     fi
     verify_cert_mount $SYSTEM_CERT_DIR
+    return 0
 }
 
 
@@ -96,4 +97,5 @@ init_high_version(){
             fi
         done
     done
+    return 0
 }

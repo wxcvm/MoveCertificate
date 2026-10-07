@@ -15,6 +15,7 @@ print_modname() {
   ui_print " Supports Android7-17 move cert"
   ui_print "*******************************"
   ui_print " "
+    return 0
 }
 
 # Copy/extract your module files into $MODDIR in on_install.
@@ -68,6 +69,7 @@ on_install() {
     cp "$OLD_CERT_NAMES" "$MODPATH/cert_names.json"
     ui_print "- Preserved existing cert_names.json"
   fi
+    return 0
 }
 
 # You can add more functions to assist your custom script code

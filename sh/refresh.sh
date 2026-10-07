@@ -18,6 +18,7 @@ clean_builtin_leftovers() {
         rm -f "$MODULE_APEX_CONSCRYPT_NUM_DIR"/*
         print_log "cleaned builtin mode leftovers"
     fi
+    return 0
 }
 
 # 记录系统原始证书列表（system 与 apex），去重后保存，供后续比对使用
@@ -32,4 +33,5 @@ record_system_certs() {
     fi
 
     sort -u $MODDIR/system_certs.txt -o $MODDIR/system_certs.txt
+    return 0
 }

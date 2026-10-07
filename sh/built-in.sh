@@ -17,6 +17,7 @@ init_low_builtin_method() {
     print_log "Fix $MODULE_SYSTEM_CERT_DIR permissions status:$?" 
     set_selinux_context $SYSTEM_CERT_DIR $MODULE_SYSTEM_CERT_DIR
     
+    return 0
 }
 
 init_high_builtin_method() {
@@ -39,4 +40,5 @@ init_high_builtin_method() {
     set_selinux_context $APEX_CONSCRYPT_DIR $MODULE_APEX_CONSCRYPT_DIR
     set_selinux_context $APEX_CONSCRYPT_DIR $MODULE_APEX_CONSCRYPT_NUM_DIR
     
+    return 0
 }

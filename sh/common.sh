@@ -14,6 +14,7 @@ LOG_TAG="iyue"
 echo "[$LOG_TAG] Keep only one up-to-date log" >$LOG_PATH
 print_log() {
     echo "[$LOG_TAG] $@" >>$LOG_PATH
+    return 0
 }
 
 # ==================== 模式配置读取 ====================
@@ -55,6 +56,7 @@ read_mode_config() {
             CURRENT_MODE="compatible"
             ;;
     esac
+    return 0
 }
 
 # PATH DIR
@@ -134,6 +136,7 @@ move_custom_cert() {
         print_log "The directory $CUSTOM_CERT_DIR is empty."
     fi
     print_log "Install $CUSTOM_CERT_DIR status:$?"
+    return 0
 }
 
 fix_user_permissions() {
@@ -145,6 +148,7 @@ fix_user_permissions() {
     chown system:system $USER_CERT_DIR
     chmod 755 $USER_CERT_DIR
     print_log "fix user certificate permissions status:$?"
+    return 0
 }
 
 fix_system_permissions() {
@@ -156,6 +160,7 @@ fix_system_permissions() {
     touch -t 200901010800 $1/*
     touch -t 200901010800 $1
     print_log "fix permissions $1 status:$?"
+    return 0
 }
 
 fix_system_permissions14() {
@@ -166,6 +171,7 @@ fix_system_permissions14() {
     touch -t 197001010800 "$1"/*
     touch -t 197001010800 "$1"
     print_log "fix permissions: $?"
+    return 0
 }
 
 set_selinux_context(){
@@ -178,6 +184,7 @@ set_selinux_context(){
     else
         chcon -R $default_selinux_context $2
     fi
+    return 0
 }
 
 compatible(){
@@ -216,6 +223,7 @@ compatible(){
         fi
     done
     mkdir -p -m 755 "$MODULE_APEX_CONSCRYPT_NUM_DIR"
+    return 0
 }
 
 # ==================== nsenter 兼容层 ====================
@@ -258,6 +266,7 @@ nsenter_probe() {
     fi
     NSENTER_STYLE=$(echo $NSENTER_TRY | cut -d' ' -f1)
     print_log "nsenter: reference pid=$_np_ref ($_np_target) order=$NSENTER_TRY"
+    return 0
 }
 
 # 在指定 pid 的 mount namespace 里执行命令；同 ns 时直接执行。
@@ -290,6 +299,7 @@ merge_user_certs() {
         cp -u "$_ucd_dir"/* "$MODULE_CERT_DIR" 2>/dev/null
         print_log "merged user certs from $_ucd_dir"
     done
+    return 0
 }
 
 # 挂载结果自检：生效目录里应能看到模块里的证书数量。
