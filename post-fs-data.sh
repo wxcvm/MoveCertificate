@@ -13,10 +13,15 @@ MODDIR=${0%/*}
 
 print_log "start move cert !"
 print_log "current sdk version is $sdk_version_number"
+print_log "android release: $(getprop ro.build.version.release) / patch: $(getprop ro.build.version.security_patch)"
+print_log "kernel su: $(command -v ksud || echo none) / magisk: $(command -v magisk || echo none)"
 
 # 读取模式配置
 read_mode_config
 print_log "current mode is $CURRENT_MODE"
+
+# 先探测 nsenter 写法（Android 17 自带 toybox，旧代码的 util-linux 写法容易静默失效）
+nsenter_probe
 
 # 清理 builtin 模式遗留的挂载目录文件
 clean_builtin_leftovers
@@ -39,4 +44,12 @@ else
     fi
 fi
 
+# 结束自检：把结果也写一份到 /data/local/tmp，方便用 adb 直接看（模块目录里的
+# 日志得先找到模块路径）
 print_log "certificates installed"
+if [ "$sdk_version_number" -le 33 ]; then
+    verify_cert_mount $SYSTEM_CERT_DIR
+else
+    verify_cert_mount $APEX_CONSCRYPT_DIR
+fi
+cp -f "$LOG_PATH" /data/local/tmp/MoveCertificate.log 2>/dev/null

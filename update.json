@@ -1,6 +1,6 @@
 {
-    "versionCode": 28,
-    "version": "v1.6.2",
-    "zipUrl": "https://pfile.ys1231.cn/modules/MoveCertificate/MoveCertificate-v1.6.2.zip",
-    "changelog": "https://pfile.ys1231.cn/modules/MoveCertificate/changelog.md"
+    "versionCode": 29,
+    "version": "v1.6.3",
+    "zipUrl": "https://github.com/wxcvm/MoveCertificate/releases/download/v1.6.3/MoveCertificate-v1.6.3.zip",
+    "changelog": "https://raw.githubusercontent.com/wxcvm/MoveCertificate/main/changelog.md"
 }

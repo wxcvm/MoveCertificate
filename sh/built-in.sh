@@ -7,8 +7,8 @@ init_low_builtin_method() {
 
     print_log "Use built-in method"
     rm -rf $MODULE_CERT_DIR/*
-    print_log "Backup $USER_CERT_DIR to $MODULE_CERT_DIR"
-    cp -u $USER_CERT_DIR/* $MODULE_CERT_DIR
+    print_log "Backup user certs ($USER_CERT_DIRS)"
+    merge_user_certs
     move_custom_cert
     compatible
     cp -f $MODULE_CERT_DIR/* $MODULE_SYSTEM_CERT_DIR
@@ -23,8 +23,8 @@ init_high_builtin_method() {
     
     print_log "Use built-in method"
     rm -rf $MODULE_CERT_DIR/*
-    print_log "Backup $USER_CERT_DIR to $MODULE_CERT_DIR"
-    cp -u $USER_CERT_DIR/* $MODULE_CERT_DIR
+    print_log "Backup user certs ($USER_CERT_DIRS)"
+    merge_user_certs
     move_custom_cert
     compatible
     cp -f $MODULE_CERT_DIR/* $MODULE_APEX_CONSCRYPT_DIR

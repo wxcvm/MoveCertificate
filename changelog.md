@@ -1,3 +1,13 @@
+- fix(mount): :bug: 适配 Android 17(API 37)：nsenter 兼容 toybox 写法，并用 readlink 校验命名空间真的切换成功；挂载结果自检（模块证书数 vs 生效目录证书数）
+- fix(mount): :bug: 处理 Android 14+ 的 /data/misc/apexdata/com.android.conscrypt/cacerts：该目录非空时 Conscrypt 会忽略只覆盖 APEX 的做法
+- feat(mount): :sparkles: 合并所有用户的 cacerts-added（工作资料/多用户此前被忽略）
+- chore(release): :bookmark: v1.6.3 (versionCode 29)
+---
+- fix(mount): :bug: Android 17 (API 37): accept the toybox nsenter syntax and verify with readlink that the namespace really switched; self-check the mount result (module cert count vs effective count)
+- fix(mount): :bug: Handle /data/misc/apexdata/com.android.conscrypt/cacerts on Android 14+ - Conscrypt ignores an APEX-only overlay once that store is populated
+- feat(mount): :sparkles: Merge CA certificates from every user (work profiles and secondary users were ignored)
+- chore(release): :bookmark: v1.6.3 (versionCode 29)
+---
 - feat(cert): :sparkles: 新增证书名称本地缓存，优先读取本地缓存再查询远程 API
 - docs(readme): :memo: 更新证书哈希计算步骤
 ---

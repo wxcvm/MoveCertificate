@@ -67,11 +67,26 @@ CUSTOM_CERT_DIR=/data/local/tmp/cert
 ## User certificate directory
 USER_CERT_DIR=/data/misc/user/0/cacerts-added
 
+## Every user's certificate directory.
+## The store is per Android user, and the module only ever looked at user 0, so
+## certificates installed by a work profile or a secondary user were ignored.
+## USER_CERT_DIR stays as the user-0 compatibility alias.
+USER_CERT_DIRS=""
+for _ucd in /data/misc/user/*/cacerts-added; do
+    [ -d "$_ucd" ] && USER_CERT_DIRS="$USER_CERT_DIRS $_ucd"
+done
+[ -n "$USER_CERT_DIRS" ] || USER_CERT_DIRS="$USER_CERT_DIR"
+
 ## System certificate directory
 SYSTEM_CERT_DIR=/system/etc/security/cacerts
 
 ## Apex conscrypt directory
 APEX_CONSCRYPT_DIR=/apex/com.android.conscrypt/cacerts
+
+## Conscrypt's *updateable* trust store (Android 14+). Conscrypt reads this one
+## when it is populated, and then an overlay over the APEX alone is ignored -
+## the blind spot that could make "moved" certificates invisible on 14+ builds.
+APEXDATA_CERT_DIR=/data/misc/apexdata/com.android.conscrypt/cacerts
 
 ## Module built-in 
 MODULE_SYSTEM_CERT_DIR=$MODDIR/system/etc/security/cacerts
@@ -187,4 +202,92 @@ compatible(){
         fi
     done
     mkdir -p -m 755 "$MODULE_APEX_CONSCRYPT_NUM_DIR"
+}
+
+# ==================== nsenter 兼容层 ====================
+# 模块必须在 init / zygote 的 mount namespace 里重复 bind 挂载，否则已经运行
+# 起来的进程看不到新的证书目录。这里有两个坑：
+#
+# 1) nsenter 有两种写法：
+#      util-linux: nsenter --mount=/proc/<pid>/ns/mnt -- CMD
+#      toybox    : nsenter -t <pid> -m -- CMD     （Android 自带的就是 toybox）
+# 2) 不同进程的 namespace 关系不一样：init 往往和我们同 ns（无需切换），
+#    zygote / webview_zygote 一定不同 ns（必须切换）。
+#
+# 旧代码对所有 pid 都用第一种写法且不检查返回值，失败时静默跳过。
+# 现在：先对"ns 确实不同的 pid"验证哪种写法有效（用 readlink 对比 ns 身份，
+# 而不是看退出码），之后逐个 pid 走 ns_run()，同 ns 就直接执行。
+NSENTER_TRY="path toybox"
+NSENTER_STYLE=path
+
+nsenter_probe() {
+    _np_ref=""
+    for _np_pid in 1 $(pgrep zygote64) $(pgrep zygote) $(pgrep webview_zygote); do
+        _np_t=$(readlink /proc/$_np_pid/ns/mnt 2>/dev/null)
+        _np_s=$(readlink /proc/self/ns/mnt 2>/dev/null)
+        if [ -n "$_np_t" ] && [ "$_np_t" != "$_np_s" ]; then
+            _np_ref=$_np_pid
+            break
+        fi
+    done
+    if [ -z "$_np_ref" ]; then
+        print_log "nsenter: every visible process shares our mount namespace; order kept: $NSENTER_TRY"
+        return 0
+    fi
+    _np_target=$(readlink /proc/$_np_ref/ns/mnt 2>/dev/null)
+    if [ "$(nsenter --mount=/proc/$_np_ref/ns/mnt -- readlink /proc/self/ns/mnt 2>/dev/null)" = "$_np_target" ]; then
+        NSENTER_TRY="path toybox"
+    elif [ "$(nsenter -t "$_np_ref" -m -- readlink /proc/self/ns/mnt 2>/dev/null)" = "$_np_target" ]; then
+        NSENTER_TRY="toybox path"
+    else
+        print_log "nsenter: neither syntax switched namespaces (reference pid $_np_ref)"
+    fi
+    NSENTER_STYLE=$(echo $NSENTER_TRY | cut -d' ' -f1)
+    print_log "nsenter: reference pid=$_np_ref ($_np_target) order=$NSENTER_TRY"
+}
+
+# 在指定 pid 的 mount namespace 里执行命令；同 ns 时直接执行。
+ns_run() {
+    _nr_pid=$1
+    shift
+    _nr_t=$(readlink /proc/$_nr_pid/ns/mnt 2>/dev/null)
+    _nr_s=$(readlink /proc/self/ns/mnt 2>/dev/null)
+    if [ -n "$_nr_t" ] && [ "$_nr_t" = "$_nr_s" ]; then
+        "$@"
+        return $?
+    fi
+    for _nr_style in $NSENTER_TRY; do
+        case "$_nr_style" in
+            path)   nsenter --mount=/proc/$_nr_pid/ns/mnt -- "$@" ;;
+            toybox) nsenter -t "$_nr_pid" -m -- "$@" ;;
+        esac
+        if [ $? -eq 0 ]; then
+            NSENTER_STYLE=$_nr_style
+            return 0
+        fi
+    done
+    return 1
+}
+
+# 合并所有用户的 cacerts-added（含工作资料/多用户），不再只看 user 0
+merge_user_certs() {
+    for _ucd_dir in $USER_CERT_DIRS; do
+        [ -d "$_ucd_dir" ] || continue
+        cp -u "$_ucd_dir"/* "$MODULE_CERT_DIR" 2>/dev/null
+        print_log "merged user certs from $_ucd_dir"
+    done
+}
+
+# 挂载结果自检：生效目录里应能看到模块里的证书数量。
+# 旧代码不做任何校验，"挂载成功但内容空/没生效"只能等用户反馈才发现。
+verify_cert_mount() {
+    _vc_target=$1
+    _vc_want=$(ls -A "$MODULE_CERT_DIR" 2>/dev/null | wc -l)
+    _vc_got=$(ls -A "$_vc_target" 2>/dev/null | wc -l)
+    print_log "verify $_vc_target: module=$_vc_want effective=$_vc_got"
+    if [ "$_vc_want" -gt 0 ] && [ "$_vc_got" -lt "$_vc_want" ]; then
+        print_log "WARNING: $_vc_target shows fewer certificates than the module ($_vc_got < $_vc_want)"
+        return 1
+    fi
+    return 0
 }
