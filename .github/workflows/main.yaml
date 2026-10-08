@@ -20,10 +20,10 @@ jobs:
       contents: write
     # 任务步骤
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '22'
           cache: 'npm'
@@ -52,7 +52,7 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
       
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: MoveCertificate-${{ steps.get_version.outputs.VERSION }}
           path: MoveCertificate-*.zip
@@ -61,7 +61,7 @@ jobs:
       # 手动创建一个 Release 才会自动把包push上去
       - name: Upload to Release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           files: MoveCertificate-*.zip
           token: ${{ secrets.GITHUB_TOKEN }}
