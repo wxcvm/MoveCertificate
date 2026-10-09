@@ -1,0 +1,97 @@
+# MoveCertificate 模块发布
+#
+# 为什么需要它：CI 的 artifact 天生会被 GitHub **再压一层 zip** —— 下载下来是这样的
+# 双层结构：MoveCertificate.zip → MoveCertificate-vX.Y.zip → module.prop
+# 用户必须先解压一次才能刷入，这正是"本身就是一个压缩包，还压缩了一次"的来源。
+# Release 附件是**原样提供**的（不再包一层），因此这里在推送 tag 或手动触发时，
+# 用 buildzip.sh 产出的模块 zip 直接建 Release 并作为唯一附件。
+#
+# 三个 Action 全部固定到 commit SHA：可变 tag 可被上游改写，而这条流水线产出的是
+# 会被用户刷进系统的模块包，属于供应链上最值得加固的一环。
+name: Release module
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v2.0). Leave empty to use the module.prop version.'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      # 与 Build and Package 同一个构建路径：先编译 webroot，再让 buildzip.sh 打包，
+      # 避免出现"测试的产物"和"发布的产物"不是同一份的情况。
+      # 注：ubuntu-latest 自带 Node（20/22），因此不引入 setup-node ——
+      # 任何 Action 一旦写进流水线就必须固定到真实解析过的 SHA，凭空写一个会直接失败。
+      - name: Build webroot
+        run: |
+          cd webdev
+          npm ci --ignore-scripts
+          npm run build
+
+      - name: Package module
+        id: pack
+        run: |
+          chmod +x buildzip.sh
+          ./buildzip.sh
+          ZIP=$(ls -1 *.zip | head -1)
+          if [ -z "$ZIP" ]; then echo "::error::buildzip.sh did not produce a zip"; exit 1; fi
+          # 模块 zip 的根目录必须有 module.prop，否则刷入会失败（Magisk/KernelSU 都要求）
+          if ! unzip -l "$ZIP" | grep -q ' module.prop$'; then
+            echo "::error::$ZIP has no module.prop at its root"; unzip -l "$ZIP" | head -30; exit 1
+          fi
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          VER=$(sed -n 's/^version=//p' module.prop | head -1)
+          TAG="${{ github.event.inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            if [ -n "${{ github.ref_name }}" ] && [ "${{ github.ref_type }}" = "tag" ]; then
+              TAG="${{ github.ref_name }}"
+            else
+              TAG="v${VER:-0.0}"
+            fi
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "module version: ${VER:-unknown}; release tag: $TAG"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          ZIP: ${{ steps.pack.outputs.zip }}
+        run: |
+          set -e
+          NOTES="MoveCertificate 模块包（单个 zip，根目录含 module.prop，可直接在 Magisk / KernelSU 中刷入）。
+          版本：$(sed -n 's/^version=//p' module.prop | head -1)
+          versionCode：$(sed -n 's/^versionCode=//p' module.prop | head -1)"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" --clobber
+            echo "uploaded $ZIP to existing release $TAG"
+          else
+            gh release create "$TAG" "$ZIP" --title "MoveCertificate $TAG" --notes "$NOTES"
+            echo "created release $TAG with $ZIP"
+          fi
+
+      # 同时保留 artifact（方便在 Actions 页直接取），但**不要**把它当成给用户的入口：
+      # 它一定是双层 zip。
+      - name: Keep the build artifact too
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: module-zip
+          path: ${{ steps.pack.outputs.zip }}
