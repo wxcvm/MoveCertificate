@@ -1,0 +1,39 @@
+# SonarCloud 扫描（CI 分析）
+#
+# 为什么需要它：本仓库原先依赖 SonarCloud 的 Automatic Analysis，但分析长期未更新
+# （最新一次停在 2026-10-07T06:15，之后的修复都没有被分析）。Automatic Analysis 已
+# 关闭，改由这里在每次推送时扫描 —— 结果可复现，且与仓库配置保持同步。
+#
+# 需要仓库 secret：SONAR_TOKEN（SonarCloud → My Account → Security → Generate Tokens）。
+#
+# 所有 Action 都固定到完整 commit SHA：可变 tag 可被上游改写，是供应链攻击面
+# （SonarCloud githubactions:S7637）。
+name: SonarCloud
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  sonar:
+    name: Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        # fetch-depth: 0 —— 新代码判定需要完整历史，浅克隆会让"新代码"口径失真
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@2f77a1ec69fb1d595b06f35ab27e97605bdef703 # v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
