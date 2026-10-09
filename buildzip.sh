@@ -1,4 +1,6 @@
 #!/bin/bash
+# 行尾必须是 LF（见 .gitattributes）：CRLF 会让 shebang 变成 "#!...\r"，
+# 在 Linux / mksh 下报 "cannot execute: required file not found"。
 
 # 检查参数
 BUILD_WEB=true
