@@ -152,37 +152,44 @@ fix_user_permissions() {
 }
 
 fix_system_permissions() {
-    chown root:root $1
-    chown -R root:root $1
-    chmod -R 644 $1
-    chmod 755 $1
-    chcon u:object_r:system_file:s0 $1/*
-    touch -t 200901010800 $1/*
-    touch -t 200901010800 $1
-    print_log "fix permissions $1 status:$?"
+    # 位置参数先落到 local（shelldre:S7679），并且**加引号**：未加引号的 $1 会做分词
+    # 与通配展开，路径含空格或恰好命中 glob 时会误伤别的文件。
+    local target="$1"
+    chown root:root "$target"
+    chown -R root:root "$target"
+    chmod -R 644 "$target"
+    chmod 755 "$target"
+    chcon u:object_r:system_file:s0 "$target"/*
+    touch -t 200901010800 "$target"/*
+    touch -t 200901010800 "$target"
+    print_log "fix permissions $target status:$?"
     return 0
 }
 
 fix_system_permissions14() {
-    chown -R system:system "$1"
-    chown root:shell "$1"
-    chmod -R 644 "$1"
-    chmod 755 "$1"
-    touch -t 197001010800 "$1"/*
-    touch -t 197001010800 "$1"
+    local target="$1"
+    chown -R system:system "$target"
+    chown root:shell "$target"
+    chmod -R 644 "$target"
+    chmod 755 "$target"
+    touch -t 197001010800 "$target"/*
+    touch -t 197001010800 "$target"
     print_log "fix permissions: $?"
     return 0
 }
 
 set_selinux_context(){
+    # 同样：local + 引号。这里原来 $1/$2 完全没引号，ls/chcon 遇到带空格或含 glob
+    # 的路径会解析成别的参数（真实风险，不是风格问题）。
+    local target="${1:-}" ref_path="${2:-}" default_selinux_context selinux_context
     [ "$(getenforce)" = "Enforcing" ] || return 0
     default_selinux_context=u:object_r:system_security_cacerts_file:s0
-    selinux_context=$(ls -Zd $1 | awk '{print $1}')
+    selinux_context=$(ls -Zd "$target" | awk '{print $1}')
 
     if [ -n "$selinux_context" ] && [ "$selinux_context" != "?" ]; then
-        chcon -R $selinux_context $2
+        chcon -R "$selinux_context" "$ref_path"
     else
-        chcon -R $default_selinux_context $2
+        chcon -R "$default_selinux_context" "$ref_path"
     fi
     return 0
 }

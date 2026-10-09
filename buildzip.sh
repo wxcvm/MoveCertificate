@@ -33,7 +33,11 @@ fi
 # 编译 webroot（当参数为 sweb 时跳过）
 if [ "$BUILD_WEB" = true ]; then
     echo "正在编译 webroot..."
-    cd webdev && npm install && npm run build && cd ..
+    # --ignore-scripts：不执行依赖包的生命周期脚本（供应链攻击最常见的入口，
+    # SonarCloud shell:S6505）。这里安全：esbuild 0.16+ 的平台二进制来自
+    # optionalDependencies（@esbuild/<platform>），不依赖 postinstall；
+    # typescript / javascript-obfuscator 都是纯 JS。
+    cd webdev && npm install --ignore-scripts && npm run build && cd ..
 else
     echo "跳过 webroot 编译..."
 fi
