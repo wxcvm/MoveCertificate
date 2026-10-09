@@ -58,7 +58,9 @@ jobs:
       - name: Resolve tag
         id: tag
         run: |
-          VER=$(sed -n 's/^version=//p' module.prop | head -1)
+          # module.prop 的 version 通常自带 "v"（v1.6.3），再补一个就成了 vv1.6.3 ——
+          # 先把可能的 v/V 前缀去掉再统一加，避免出现双 v 标签。
+          VER=$(sed -n 's/^version=//p' module.prop | head -1 | sed 's/^[vV]//')
           TAG="${{ github.event.inputs.tag }}"
           if [ -z "$TAG" ]; then
             if [ -n "${{ github.ref_name }}" ] && [ "${{ github.ref_type }}" = "tag" ]; then
