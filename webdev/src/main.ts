@@ -26,6 +26,7 @@ import {
     getCurrentMode,
     setMode,
     getRuntimeInfo,
+    setCertEnabled,
 } from './cert-service.js';
 import {
     renderVersionInfo,
@@ -206,7 +207,7 @@ async function loadCertList(force = false): Promise<void> {
         if (certs.length === 0) {
             toast(t('noCertFound'));
         }
-        renderCertList('certificateList', certs, handleDelete);
+        renderCertList('certificateList', certs, handleDelete, handleMountSelection);
     } catch (e) {
         console.error('加载证书列表失败:', e);
         // 失败时重置标记：删除后刷新失败会导致列表与实际状态不一致，切换 Tab 时自动重试
@@ -314,6 +315,17 @@ const switchModeHandler: SwitchModeHandler = (newMode) => {
 const handleDelete: DeleteHandler = (fileName) => {
     deleteModal?.show(fileName);
 };
+
+async function handleMountSelection(fingerprint: string, enabled: boolean): Promise<void> {
+    try {
+        await setCertEnabled(fingerprint, enabled);
+        toast(t('mountSelectionSaved'));
+        await loadCertList(true);
+    } catch (error) {
+        toast(t('mountSelectionFailed'));
+        throw error;
+    }
+}
 
 /**
  * 用户在确认框中点击"确认"后执行删除

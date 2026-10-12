@@ -21,6 +21,7 @@ setup() {
     mkdir -p "$MODDIR" "$MODDIR/native" "$MODDIR/user0" "$MODDIR/user10" "$MODDIR/custom"
     SYSTEM_SOURCE="$MODDIR/native"; MODULE_CERT_DIR="$MODDIR/state/certs"
     MANIFEST="$MODDIR/state/certificate-sources.tsv"; LOG_PATH="$MODDIR/install.log"
+    SELECTION_PATH="$MODDIR/cert-selection.tsv"
     CUSTOM_CERT_DIR="$MODDIR/custom"; USER_CERT_DIRS="$MODDIR/user0 $MODDIR/user10"
     TEMP_DIR="$MODDIR/mounted"; BOOT_ID=test-boot; SDK=33; CURRENT_MODE=compatible; CERT_OPENSSL=''
     cp "$FIX/native.pem" "$SYSTEM_SOURCE/$HASH.0"
@@ -98,4 +99,49 @@ if command -v openssl >/dev/null 2>&1; then
     openssl x509 -in "$MODULE_CERT_DIR/$HASH.1" -noout || fail 'output X509 unreadable'
     ok 'real X.509 parser accepts a CA and preserves invalid custom input'
 fi
+setup
+cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+base64 -d "$FIX/collision.b64" > "$MODDIR/user10/$HASH.2"
+user_digest=$(file_digest "$MODDIR/user10/$HASH.2")
+printf '%s\t0\n' "$user_digest" > "$SELECTION_PATH"
+prepare_cert_store || fail 'disabled preparation'
+[ ! -e "$MODULE_CERT_DIR/$HASH.1" ] && [ "$(grep -c 'disabled$' "$MANIFEST")" -eq 2 ] || fail 'fingerprint disable must cover all users'
+[ -f "$MODDIR/user0/$HASH.0" ] && [ -f "$MODDIR/user10/$HASH.2" ] || fail 'toggle deleted original inputs'
+ok 'disabled fingerprint skips every user copy and preserves originals'
+printf '%s\t1\n' "$user_digest" > "$SELECTION_PATH"
+prepare_cert_store || fail 'enabled preparation'
+[ -f "$MODULE_CERT_DIR/$HASH.1" ] || fail 're-enable did not restore migration'
+ok 're-enabling restores migration on the next preparation'
+# Defaults are intentionally narrow, and explicit choice can override them.
+printf '\060AdGuard Personal Intermediate' > "$MODDIR/intermediate.der"
+if certificate_enabled "$user_digest" 47ec1af8 "$MODDIR/intermediate.der"; then :; else fail 'explicit enabled intermediate ignored'; fi
+rm "$SELECTION_PATH"
+if certificate_enabled "$user_digest" 47ec1af8 "$MODDIR/intermediate.der"; then fail 'AdGuard intermediate default enabled'; fi
+certificate_enabled "$user_digest" 0f4ed297 "$MODDIR/intermediate.der" || fail 'AdGuard root default disabled'
+ok 'AdGuard intermediate defaults off, root on, with explicit override supported'
+setup
+cp "$FIX/native.pem" "$MODDIR/user0/$HASH.0"
+base64 -d "$FIX/native.b64" > "$MODDIR/native.der"
+native_digest=$(file_digest "$MODDIR/native.der")
+printf '%s\t0\n' "$native_digest" > "$SELECTION_PATH"
+prepare_cert_store || fail 'native protection'
+grep -q 'native$' "$MANIFEST" && cmp -s "$MODULE_CERT_DIR/$HASH.0" "$FIX/native.pem" || fail 'native CA hidden by selection'
+ok 'user migration selection cannot remove an identical native CA'
+printf 'corrupt\t0\n' > "$SELECTION_PATH"
+if prepare_cert_store; then fail 'malformed selection accepted'; fi
+ok 'malformed selection fails without publishing an unintended trust set'
+# Exercise the real helper body with fixture paths and no root/process locking.
+sed '/^MODDIR=/d; /^\. "$MODDIR\/sh\/runtime.sh"/d; /^init_paths || exit 1/d' "$ROOT/sh/set-cert-enabled.sh" > "$TEST_ROOT/toggle-helper.sh"
+setup
+cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+prepare_cert_store || fail 'helper baseline'
+user_digest=$(awk -F '\t' '{print $1; exit}' "$MANIFEST")
+lock_state() { return 0; }
+( set -- "$user_digest" 0; . "$TEST_ROOT/toggle-helper.sh" ) || fail 'helper save'
+grep -q "^$user_digest$(printf '\t')0$" "$SELECTION_PATH" || fail 'helper did not publish selection'
+grep -q 'pending$' "$MANIFEST" && [ -f "$MODULE_CERT_DIR/$HASH.1" ] && [ -f "$MODDIR/user0/$HASH.0" ] || fail 'helper modified live state/input'
+ok 'actual toggle helper atomically saves next-boot selection without changing live CA/input'
+( set -- "$user_digest" 1; . "$TEST_ROOT/toggle-helper.sh" ) || fail 'helper re-enable'
+grep -q "^$user_digest$(printf '\t')1$" "$SELECTION_PATH" && [ "$(wc -l < "$SELECTION_PATH")" -eq 1 ] || fail 'helper appended conflicting duplicate choice'
+ok 'actual toggle helper replaces a prior choice rather than appending conflicts'
 printf 'PASS: %s shell regression cases\n' "$pass"

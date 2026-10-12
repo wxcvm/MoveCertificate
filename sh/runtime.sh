@@ -8,6 +8,7 @@ init_paths() {
     BOOT_ID=$(cat /proc/sys/kernel/random/boot_id) || return 1
     MODULE_CERT_DIR="$MODDIR/state/certs"
     MANIFEST="$MODDIR/state/certificate-sources.tsv"
+    SELECTION_PATH="$MODDIR/cert-selection.tsv"
     RUNTIME="$MODDIR/runtime.conf"
     LOG_PATH="$MODDIR/install.log"
     CUSTOM_CERT_DIR=/data/local/tmp/cert
@@ -70,8 +71,27 @@ cert_to_der() {
 
 file_digest() { sha256sum "$1" | cut -d' ' -f1; }
 
+validate_selections() {
+    [ -f "$SELECTION_PATH" ] || return 0
+    [ ! -L "$SELECTION_PATH" ] || return 1
+    awk -F '\t' 'NF != 2 || length($1) != 64 || $1 !~ /^[0-9a-f]+$/ || $2 !~ /^[01]$/ {bad=1} END {exit bad}' "$SELECTION_PATH"
+}
+
+certificate_enabled() {
+    local digest="$1" hash="$2" der="$3" selected=''
+    if [ -f "$SELECTION_PATH" ]; then
+        selected=$(awk -F '\t' -v d="$digest" '$1 == d {value=$2} END {print value}' "$SELECTION_PATH")
+    fi
+    case "$selected" in 1) return 0 ;; 0) return 1 ;; esac
+    # Preserve the existing default for AdGuard's personal intermediate only.
+    # An explicit WebUI selection overrides this default; root CAs remain on.
+    if [ "$hash" = 47ec1af8 ] && grep -aq 'Guard Personal Intermediate\|AdGuard Intermediate CA' "$der"; then return 1; fi
+    return 0
+}
+
 prepare_cert_store() {
     local stage input name hash digest target index prior rc owner origin user_dir original_count=0
+    validate_selections || { print_log 'ERROR: invalid certificate selections'; return 1; }
     prior="$MODDIR/.state.previous"
     if [ -d "$prior" ]; then
         if [ -d "$MODDIR/state" ]; then rm -rf "$prior"; else mv "$prior" "$MODDIR/state"; fi
@@ -103,6 +123,7 @@ prepare_cert_store() {
         remove_stage "$stage"
         return 1
     fi
+    cp "$stage/index.tsv" "$stage/native.tsv" || { remove_stage "$stage"; return 1; }
     # Validate native hash sequences before adding any files.
     for input in "$stage/certs"/*; do
         name=${input##*/}; hash=${name%.*}; index=${name##*.}
@@ -139,9 +160,14 @@ prepare_cert_store() {
                 hash=$("$CERT_OPENSSL" x509 -inform DER -in "$stage/current.der" -subject_hash_old -noout) || { remove_stage "$stage"; return 1; }
             fi
             printf '%s\n' "$hash" | grep -Eq '^[0-9a-f]{8}$' || { remove_stage "$stage"; return 1; }
-            if [ "$hash" = 47ec1af8 ] && grep -aq 'Guard Personal Intermediate\|AdGuard Intermediate CA' "$stage/current.der"; then
-                printf '%s\t-\t%s\texcluded\n' "$digest" "$input" >> "$stage/sources.tsv"
-                print_log "EXCLUDED AdGuard intermediate: $input (root CA remains eligible)"
+            target=$(awk -F '\t' -v d="$digest" '$1 == d {print $2; exit}' "$stage/native.tsv")
+            if [ -n "$target" ]; then
+                printf '%s\t%s\t%s\tnative\n' "$digest" "$target" "$input" >> "$stage/sources.tsv"
+                continue
+            fi
+            if ! certificate_enabled "$digest" "$hash" "$stage/current.der"; then
+                printf '%s\t-\t%s\tdisabled\n' "$digest" "$input" >> "$stage/sources.tsv"
+                print_log "Disabled migration for $input; input preserved"
                 continue
             fi
             target=$(awk -F '\t' -v d="$digest" '$1 == d {print $2; exit}' "$stage/index.tsv")
@@ -168,7 +194,7 @@ prepare_cert_store() {
     mv "$stage/sources.tsv" "$stage/certificate-sources.tsv" && \
         mv "$stage/system.txt" "$stage/system_certs.txt" && \
         chmod 600 "$stage/certificate-sources.tsv" "$stage/system_certs.txt" || { remove_stage "$stage"; return 1; }
-    rm -f "$stage/current.der" "$stage/index.tsv"
+    rm -f "$stage/current.der" "$stage/index.tsv" "$stage/native.tsv"
     if [ -d "$MODDIR/state" ]; then mv "$MODDIR/state" "$prior" || { remove_stage "$stage"; return 1; }; fi
     if ! mv "$stage" "$MODDIR/state"; then
         [ ! -d "$prior" ] || mv "$prior" "$MODDIR/state"

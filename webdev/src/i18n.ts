@@ -32,6 +32,13 @@ export interface LangItem {
 // 如果你要加新文字，在这里添加一个 key，然后给三种语言分别填上翻译即可
 
 const translations: Record<string, TranslationEntry> = {
+    mountCertificate: { 'zh-CN': '挂载', en: 'Mount', tr: 'Bağla' },
+    mountPendingReboot: { 'zh-CN': '待重启', en: 'Reboot pending', tr: 'Yeniden başlatma bekliyor' },
+    mountSelectionHint: { 'zh-CN': '勾选后在下次启动挂载；取消仅跳过迁移，保留用户证书。', en: 'Apply on next boot. Unchecking keeps the user certificate and skips migration.', tr: 'Sonraki açılışta uygulanır. Kaldırmak kullanıcı sertifikasını silmez.' },
+    mountSelectionSaved: { 'zh-CN': '已保存挂载选择，重启后生效；原证书已保留', en: 'Mount selection saved; reboot required. Input preserved.', tr: 'Bağlama seçimi kaydedildi; yeniden başlatma gerekli. Kaynak korundu.' },
+    mountSelectionFailed: { 'zh-CN': '保存挂载选择失败', en: 'Could not save mount selection', tr: 'Bağlama seçimi kaydedilemedi' },
+    status_disabled: { 'zh-CN': '本次启动未挂载，原用户证书保留', en: 'Migration disabled this boot; user certificate preserved', tr: 'Bu açılışta taşıma kapalı; kullanıcı sertifikası korundu' },
+    status_native: { 'zh-CN': '原生系统 CA，不属于用户证书挂载开关范围', en: 'Native system CA; protected from migration toggles', tr: 'Yerel sistem CA; taşıma anahtarlarından korunur' },
     effectiveMode: { 'zh-CN': '本次启动实际模式', en: 'Effective mode this boot', tr: 'Bu açılıştaki etkin mod' },
     builtinUnsupported: { 'zh-CN': 'Android 16 及以上仅支持兼容模式；旧的内置配置会自动回退。', en: 'Android 16+ uses compatible mode; old builtin settings fall back automatically.', tr: 'Android 16+ uyumlu modu kullanır; eski yerleşik ayarlar otomatik geri döner.' },
     status_success: { 'zh-CN': '已验证挂载内容', en: 'Mounted contents verified', tr: 'Bağlanan içerik doğrulandı' },

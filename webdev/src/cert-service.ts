@@ -2,7 +2,7 @@ import { exec } from 'kernelsu';
 import {
     MODULE_DIR, CERT_HIGH_SYSTEM, CERT_LOW_SYSTEM, CERT_MODULE, MODULE_PROP_PATH,
     INSTALL_LOG_PATH, MODE_CONF_PATH, CERT_NAME_CACHE_PATH, CERT_QUERY_API,
-    MANIFEST_PATH, RUNTIME_PATH, STATE_BOOT_PATH,
+    MANIFEST_PATH, RUNTIME_PATH, STATE_BOOT_PATH, SELECTION_PATH,
 } from './constants.js';
 import type { RunMode, CertEntry, CertStatus, RuntimeInfo } from './constants.js';
 
@@ -98,7 +98,7 @@ function parseManifest(data: string): SourceRow[] {
         if (!fingerprint || !/^[0-9a-f]{64}$/.test(fingerprint) || !target ||
             (target !== '-' && !/^[0-9a-f]{8}\.[0-9]+$/.test(target)) || !source ||
             !/^\/data\/misc\/user\/\d+\/cacerts-added\/[0-9a-f]{8}\.\d+$|^\/data\/local\/tmp\/cert\/[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(source) ||
-            !state || !['pending', 'excluded', 'unverified', 'removed'].includes(state)) {
+            !state || !['pending', 'excluded', 'disabled', 'native', 'unverified', 'removed'].includes(state)) {
             throw new Error('证书来源记录损坏，请重启后重试');
         }
         return { fingerprint, target, source, state };
@@ -112,10 +112,11 @@ export async function getInstallCertResults(): Promise<CertEntry[]> {
         const inputList = await run("for d in /data/misc/user/*/cacerts-added; do [ ! -d \"$d\" ] || find \"$d\" -maxdepth 1 -type f; done");
         return inputList.split('\n').filter(path => /\/cacerts-added\/[0-9a-f]{8}\.\d+$/.test(path)).map(path => ({
             id: '', filename: path.split('/').pop()!, name: path.split('/').pop()!,
-            status: 'unknown', sources: [path], canDelete: false,
+            status: 'unknown', sources: [path], canDelete: false, enabled: false, canToggle: false, pendingChange: false,
         }));
     }
     const grouped = new Map<string, SourceRow[]>();
+    const selections = await readSelections();
     for (const row of parseManifest(data)) grouped.set(row.fingerprint, [...grouped.get(row.fingerprint) ?? [], row]);
     const system = runtime.sdk >= 34 ? CERT_HIGH_SYSTEM : CERT_LOW_SYSTEM;
     return Promise.all(Array.from(grouped, async ([fingerprint, rows]): Promise<CertEntry> => {
@@ -124,16 +125,37 @@ export async function getInstallCertResults(): Promise<CertEntry[]> {
         let status: CertStatus;
         if (row.state === 'removed') status = 'removed';
         else if (row.state === 'excluded') status = 'excluded';
+        else if (row.state === 'disabled') status = 'disabled';
+        else if (row.state === 'native') status = 'native';
         else if (row.state === 'unverified') status = 'unverified';
         else if (runtime.state !== 'ready') status = runtime.state === 'failed' ? 'failed' : 'unknown';
         else {
             const result = await exec(`test -r ${quote(CERT_MODULE + row.target)} && test -r ${quote(system + row.target)} && cmp -s ${quote(CERT_MODULE + row.target)} ${quote(system + row.target)}`) as ExecResult;
             status = result.errno === 0 ? 'success' : 'failed';
         }
-        const path = row.state === 'pending' ? CERT_MODULE + row.target : row.source;
+        const path = row.state === 'pending' || row.state === 'native' ? CERT_MODULE + row.target : row.source;
         const name = row.state === 'removed' ? filename : `${filename}: ${await getCertName(path, fingerprint)}`;
-        return { id: fingerprint, filename, status, name, sources: rows.map(item => item.source), canDelete: row.state !== 'removed' };
+        const canToggle = ['pending', 'disabled', 'excluded'].includes(row.state);
+        const bootEnabled = row.state === 'pending';
+        const enabled = canToggle ? selections.get(fingerprint) ?? bootEnabled : false;
+        return { id: fingerprint, filename, status, name, sources: rows.map(item => item.source),
+            canDelete: row.state !== 'removed', enabled, canToggle, pendingChange: canToggle && enabled !== bootEnabled };
     }));
+}
+async function readSelections(): Promise<Map<string, boolean>> {
+    const data = await optionalFile(SELECTION_PATH);
+    const selections = new Map<string, boolean>();
+    for (const line of (data ?? '').split('\n').filter(Boolean)) {
+        const match = /^([0-9a-f]{64})\t([01])$/.exec(line);
+        if (!match) throw new Error('证书挂载选择配置损坏');
+        selections.set(match[1]!, match[2] === '1');
+    }
+    return selections;
+}
+export async function setCertEnabled(fingerprint: string, enabled: boolean): Promise<void> {
+    if (!/^[0-9a-f]{64}$/.test(fingerprint) || typeof enabled !== 'boolean') throw new Error('非法的证书挂载选择');
+    await run(`sh ${quote(`${MODULE_DIR}/sh/set-cert-enabled.sh`)} ${quote(fingerprint)} ${enabled ? '1' : '0'}`);
+    if ((await readSelections()).get(fingerprint) !== enabled) throw new Error('证书挂载选择写入校验失败');
 }
 export async function deleteCert(fingerprint: string): Promise<void> {
     if (!/^[0-9a-f]{64}$/.test(fingerprint)) throw new Error('非法的证书指纹');

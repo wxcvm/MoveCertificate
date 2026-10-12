@@ -23,6 +23,10 @@ if [ -f "$OLD_MODULE/cert_names.json" ]; then
     cp "$OLD_MODULE/cert_names.json" "$MODPATH/cert_names.json" || abort 'Cannot preserve name cache'
 fi
 chmod 600 "$MODPATH/cert_names.json"
+if [ -f "$OLD_MODULE/cert-selection.tsv" ] && [ ! -L "$OLD_MODULE/cert-selection.tsv" ]; then
+    cp "$OLD_MODULE/cert-selection.tsv" "$MODPATH/cert-selection.tsv" || abort 'Cannot preserve certificate selections'
+    chmod 600 "$MODPATH/cert-selection.tsv" || abort 'Cannot secure certificate selections'
+fi
 # Android owns cacerts-added. Do not create it or alter its permissions/labels.
 if [ ! -e /data/local/tmp/cert ]; then
     mkdir -m 700 /data/local/tmp/cert || abort 'Cannot create custom certificate input directory'

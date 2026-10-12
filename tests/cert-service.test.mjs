@@ -15,7 +15,7 @@ function service(options = {}) {
         'runtime.conf': `boot_id=boot\neffective_mode=compatible\nstate=${options.state ?? 'ready'}\nreason=none`,
         'state/boot_id': 'boot', 'certificate-sources.tsv': options.manifest ?? row(),
         'cert_names.json': JSON.stringify({ [fingerprint]: 'Test CA', [other]: 'Other CA' }),
-        'mode.conf': options.mode ?? 'mode=compatible', ...options.files,
+        'mode.conf': options.mode ?? 'mode=compatible', 'cert-selection.tsv': options.selections ?? '', ...options.files,
     };
     const context = vm.createContext({ console, setTimeout, clearTimeout, AbortController, TextEncoder, btoa, crypto: webcrypto,
         exec: async command => {
@@ -30,12 +30,13 @@ function service(options = {}) {
             } else if (command.includes('cmp -s')) result.errno = options.cmpError ?? 0;
             else if (command.includes('for d in')) result.stdout = '/data/misc/user/10/cacerts-added/87654321.0';
             else if (command.includes('set-mode.sh')) files['mode.conf'] = "mode=" + (command.endsWith("'builtin'") ? 'builtin' : 'compatible');
+            else if (command.includes('set-cert-enabled.sh')) files['cert-selection.tsv'] = fingerprint + '\t' + (command.endsWith('1') ? '1' : '0');
             return result;
         }, fetch: async () => ({ ok: true, json: async () => ({ result: 'Test CA' }) }),
     });
     const code = stripTypeScriptTypes(constants.replaceAll('export ', '') + '\n' + source
         .replace(/^import .*?;\s*/gms, '').replaceAll('export ', ''));
-    vm.runInContext(code + '\nthis.api={getInstallCertResults,getRuntimeInfo,getCurrentMode,setMode,deleteCert,readFileBase64,getVersionInfo};', context);
+    vm.runInContext(code + '\nthis.api={getInstallCertResults,getRuntimeInfo,getCurrentMode,setMode,deleteCert,readFileBase64,getVersionInfo,setCertEnabled};', context);
     return { api: context.api, calls };
 }
 test('all user sources deduplicate by fingerprint, not subject filename', async () => {
@@ -95,4 +96,31 @@ test('deletion uses a fingerprint helper and propagates errors', async () => {
 test('shell read failures cannot masquerade as successful empty results', async () => {
     const { api } = service({ exec: () => ({ errno: 1, stdout: '', stderr: 'denied' }) });
     await assert.rejects(api.getVersionInfo()); await assert.rejects(api.readFileBase64('/missing'));
+});
+test('unmount preference leaves the current mounted result visible until reboot', async () => {
+    const { api } = service({ selections: fingerprint + '\t0' });
+    const cert = (await api.getInstallCertResults())[0];
+    assert.equal(cert.status, 'success'); assert.equal(cert.enabled, false);
+    assert.equal(cert.canToggle, true); assert.equal(cert.pendingChange, true);
+});
+test('AdGuard/default disabled inputs are selectable without deletion', async () => {
+    const { api } = service({ manifest: row(fingerprint, 0, 'disabled'), selections: fingerprint + '\t1' });
+    const cert = (await api.getInstallCertResults())[0];
+    assert.equal(cert.status, 'disabled'); assert.equal(cert.enabled, true); assert.equal(cert.pendingChange, true);
+    assert.equal(cert.canToggle, true);
+});
+test('native and unverified CAs cannot be changed by user migration toggles', async () => {
+    for (const state of ['native', 'unverified', 'removed']) {
+        assert.equal((await service({ manifest: row(fingerprint, 0, state) }).api.getInstallCertResults())[0].canToggle, false);
+    }
+});
+test('selection writes use a dedicated helper and verify saved preferences', async () => {
+    const { api, calls } = service();
+    await api.setCertEnabled(fingerprint, false);
+    assert.ok(calls.some(c => c.includes('set-cert-enabled.sh') && c.endsWith('0')));
+    assert.ok(!calls.some(c => c.includes('delete-cert.sh') || c.startsWith('rm ')));
+});
+test('failed selection writes do not report success', async () => {
+    const { api } = service({ exec: c => c.includes('set-cert-enabled.sh') ? { errno: 1, stderr: 'write failed', stdout: '' } : null });
+    await assert.rejects(api.setCertEnabled(fingerprint, false), /write failed/);
 });

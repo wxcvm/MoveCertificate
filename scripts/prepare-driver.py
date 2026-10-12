@@ -1,0 +1,58 @@
+"""Prepare the verified, unchanged upstream PanVK RC3 in an ignored build directory."""
+import argparse
+import hashlib
+import io
+import json
+from pathlib import Path
+import shutil
+from urllib.request import Request, urlopen
+from zipfile import ZipFile
+from elf_utils import inspect_elf
+
+ROOT = Path(__file__).resolve().parent.parent
+parser = argparse.ArgumentParser()
+parser.add_argument('--archive', type=Path, help='Previously downloaded upstream adpkg ZIP')
+args = parser.parse_args()
+upstream = json.loads((ROOT / 'driver-fix/upstream.json').read_text())
+if args.archive:
+    archive_data = args.archive.read_bytes()
+else:
+    with urlopen(Request(upstream['package_url'], headers={'User-Agent': 'MoveCertificate-build'}), timeout=60) as response:
+        archive_data = response.read(20 * 1024 * 1024)
+if hashlib.sha256(archive_data).hexdigest() != upstream['package_sha256']:
+    raise SystemExit('Upstream archive checksum mismatch')
+with ZipFile(io.BytesIO(archive_data)) as archive:
+    binary = archive.read('libvulkan_panfrost.so')
+    manifests = {name: archive.read(name) for name in ('SOURCE.json', 'MANIFEST.json', 'VALIDATION.json', 'meta.json')}
+if hashlib.sha256(binary).hexdigest() != upstream['sha256']:
+    raise SystemExit('Upstream driver checksum mismatch')
+elf = inspect_elf(binary)
+required = {'HMI', 'vk_icdGetInstanceProcAddr', 'vk_icdGetPhysicalDeviceProcAddr', 'vk_icdNegotiateLoaderICDInterfaceVersion'}
+if not required.issubset(elf['exports']) or elf.get('build_id') != upstream['build_id'] or elf.get('minimum_sdk') != upstream['minimum_sdk']:
+    raise SystemExit('Unexpected HAL exports, BuildID or minimum SDK')
+allowed = {'liblog.so', 'libnativewindow.so', 'libsync.so', 'libm.so', 'libz.so', 'libdl.so', 'libc.so'}
+if not set(elf['needed']).issubset(allowed):
+    raise SystemExit('Unreviewed dynamic dependencies')
+output = ROOT / 'driver-dist'
+# Fixed path inside the repository only; discard previous generated build output.
+if output.is_symlink() or output.resolve().parent != ROOT:
+    raise SystemExit('Build output must resolve directly inside the repository')
+if output.exists():
+    shutil.rmtree(output)
+shutil.copytree(ROOT / 'driver-fix', output, ignore=shutil.ignore_patterns('vulkan.mali.so'))
+(output / 'vulkan.mali.so').write_bytes(binary)
+(output / 'driver.sha256').write_text(upstream['sha256'] + '\n')
+(output / 'driver.conf').write_text('enable_global=1\n')
+(output / 'module.prop').write_text(
+    'id=MTK_D8100_Vulkan1.4.Panvk\nname=Dimensity 8100 PanVK RC3 (Vulkan only)\n'
+    'version=0.1.0-rc3-wrapper1\nversionCode=3\nauthor=wxcvm; upstream zenithblue-oss\n'
+    'description=Verified upstream RC3 arm64 Vulkan HAL; OpenGL/32-bit Vulkan stay OEM. Android 15+. PGKM10 runtime test pending.\n')
+(output / 'upstream').mkdir()
+for name, data in manifests.items():
+    (output / 'upstream' / name).write_bytes(data)
+validation = {'static_validation': 'passed', 'sha256': upstream['sha256'], **elf,
+              'device_runtime_validation': 'not performed on PGKM10',
+              'upstream_manifests': 'Preserved unchanged under upstream/; not PGKM10 runtime results.',
+              'open_gl_modified': False, 'vendor_partition_written': False}
+(output / 'VALIDATION.json').write_text(json.dumps(validation, indent=2) + '\n')
+print('Verified RC3: arm64 Android HAL + ICD, BuildID, minimum SDK, checksums and dependencies')

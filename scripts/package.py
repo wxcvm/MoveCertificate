@@ -1,5 +1,7 @@
 """Package separate installable modules. Diagnostics and test CAs are never included."""
 from pathlib import Path
+import hashlib
+import json
 from zipfile import ZIP_DEFLATED, ZipFile
 import re
 
@@ -38,3 +40,12 @@ driver = [(p, p.relative_to(ROOT / "driver-fix").as_posix()) for p in (ROOT / "d
           if p.is_file() and p.name != "vulkan.mali.so"]
 driver.extend((p, p.relative_to(ROOT).as_posix()) for p in (ROOT / "META-INF").rglob("*") if p.is_file())
 write_archive("PanVK-guarded-launcher-v1.0.1.zip", driver)
+
+new_driver = ROOT / 'driver-dist'
+if new_driver.exists():
+    expected = json.loads((ROOT / 'driver-fix/upstream.json').read_text())['sha256']
+    assert hashlib.sha256((new_driver / 'vulkan.mali.so').read_bytes()).hexdigest() == expected
+    assert (new_driver / 'driver.conf').read_text().strip() == 'enable_global=1'
+    entries = [(p, p.relative_to(new_driver).as_posix()) for p in new_driver.rglob('*') if p.is_file()]
+    entries.extend((p, p.relative_to(ROOT).as_posix()) for p in (ROOT / 'META-INF').rglob('*') if p.is_file())
+    write_archive('PanVK-RC3-D8100-Vulkan.zip', entries)

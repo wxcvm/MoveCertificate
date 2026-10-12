@@ -12,3 +12,5 @@ node_modules
 .actrc
 /diagnostics/
 /driver-fix/vulkan.mali.so
+/driver-dist/
+__pycache__/

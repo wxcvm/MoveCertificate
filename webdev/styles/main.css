@@ -408,6 +408,18 @@ li span {
 }
 
 /* 删除按钮 */
+.cert-mount-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+    padding: 8px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+.cert-mount-toggle input { accent-color: var(--dot-green); }
+.cert-mount-toggle + .delete-button { margin-left: 4px; }
+.cert-mount-toggle.disabled { opacity: 0.5; cursor: default; }
 .delete-button {
     margin-left: auto;
     background: var(--btn-delete-bg);

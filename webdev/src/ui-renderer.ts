@@ -13,6 +13,7 @@ import type { RunMode, CertEntry, RuntimeInfo } from './constants.js';
 
 /** 删除按钮回调 */
 export type DeleteHandler = (fileName: string, liElement: HTMLLIElement) => void;
+export type MountHandler = (fingerprint: string, enabled: boolean) => Promise<void>;
 
 /** 模式切换回调 */
 export type SwitchModeHandler = (newMode: RunMode) => void;
@@ -55,6 +56,7 @@ export function renderCertList(
     containerId: string,
     certs: CertEntry[],
     onDelete: DeleteHandler,
+    onMount: MountHandler,
 ): void {
     const list = document.getElementById(containerId);
     if (!list) return;
@@ -82,6 +84,27 @@ export function renderCertList(
         certName.textContent = cert.name;
         certName.title = `${t(`status_${cert.status}`)}\n${cert.sources.join('\n')}`;
         li.appendChild(certName);
+
+        const mountLabel = document.createElement('label');
+        mountLabel.className = 'cert-mount-toggle' + (cert.canToggle ? '' : ' disabled');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = cert.enabled;
+        checkbox.disabled = !cert.canToggle;
+        checkbox.setAttribute('aria-label', `${t('mountCertificate')}: ${cert.name}`);
+        checkbox.onchange = () => {
+            checkbox.disabled = true;
+            onMount(cert.id, checkbox.checked).catch(error => {
+                checkbox.checked = cert.enabled;
+                console.error('Certificate selection failed', error);
+            }).finally(() => { checkbox.disabled = !cert.canToggle; });
+        };
+        mountLabel.appendChild(checkbox);
+        const mountText = document.createElement('span');
+        mountText.textContent = cert.pendingChange ? t('mountPendingReboot') : t('mountCertificate');
+        mountLabel.appendChild(mountText);
+        mountLabel.title = `${t('mountSelectionHint')}\n${t(`status_${cert.status}`)}`;
+        li.appendChild(mountLabel);
 
         // 右侧的删除按钮
         const deleteButton = document.createElement('button');

@@ -17,13 +17,19 @@ WebUI 显示本次 boot ID 对应的实际模式、验证状态和证书来源�
 原输入；原生 CA 和当前活动挂载在重启前保持完整。Shell 非零退出状态会作为操作失败
 显示。证书名称缓存改用指纹，避免不同证书共享 subject hash 时名称串用。
 
+每张已验证的用户/自定义证书均可在 WebUI 勾选是否挂载。选择按指纹保存，作用于所有
+相同证书的用户副本，并跨模块升级保留。取消只跳过迁移，不删除原证书；变更在完整
+重启后生效，界面分别显示当前挂载结果和“待重启”的选择。AdGuard 根证书默认挂载，
+个人中间证书维持原有默认不挂载行为，但用户可显式开启。原生系统 CA 始终保留。
+
 推荐通过 Android 系统设置安装 CA，再重启。`/data/local/tmp/cert` 的任意文件只有在设备
 具备 `openssl` 且通过 X.509/CA 验证时才会加入；无解析器时保留输入并记为未验证。
 不会再依据首字节判断任意文件有效，也不会改变 Android 管理的用户证书目录权限。
 
-`driver-fix/` 单独打包，参见该目录说明。这是 PanVK 模块启动/卸载脚本修复和原厂 HAL
-回退方案，不是 Mesa/PanVK 二进制内部修复。Quetta 的 HTTP 200/页面正文与 Vulkan/Skia
-初始化失败同时出现，重启后使用原厂驱动的实机对照仍需完成。
+`driver-fix/` 提供原厂回退包和包含官方 PanVK RC3 的新驱动包，参见该目录说明。
+新包默认启用 64 位 Vulkan 替换，核对 SHA-256、BuildID、HAL/ICD 导出、依赖和最低
+API 35；OpenGL/EGL 及 32 位 Vulkan 保留原厂。RC3 上游记录了 G610 MC3 测试，
+本机 PGKM10/G610 MC6 的全局 HAL 和 Quetta 兼容性尚未实测，见包内 VALIDATION.json。
 
 验证命令（Node 24；Linux/Android shell）：
 
@@ -42,6 +48,6 @@ python3 scripts/package.py
 ```
 
 测试只操作临时夹具，模拟所有挂载操作；测试 CA 的私钥不落盘，测试 CA 不进入安装包。
-Actions 输出两个独立安装包。下载 Actions artifact 后需先解压外层 artifact ZIP，再用
+Actions 输出三个独立安装包。下载 Actions artifact 后需先解压外层 artifact ZIP，再用
 Root 管理器安装其中的模块 ZIP。`update.json` 仍指向现有正式发布，避免未发布版本触发
 自动更新；v1.6.4 完成实机验证并发布 Release 后再更新此文件。

@@ -7,8 +7,8 @@ import sys
 sys.stdout.reconfigure(encoding="utf-8")
 
 root = Path(__file__).resolve().parent.parent
-changed = subprocess.check_output(["git", "diff", "--name-only"], cwd=root, text=True).splitlines()
-new = subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"], cwd=root, text=True).splitlines()
+changed = subprocess.check_output(["git", "diff", "--name-only"], cwd=root, text=True, stderr=subprocess.PIPE).splitlines()
+new = subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"], cwd=root, text=True, stderr=subprocess.PIPE).splitlines()
 entries = []
 for name in sorted(set(changed + new)):
     assert not name.startswith(("diagnostics/", "webroot/", "webdev/node_modules/", ".git/"))
