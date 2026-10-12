@@ -7,7 +7,7 @@
  */
 
 import { t } from './i18n.js';
-import type { RunMode, CertEntry } from './constants.js';
+import type { RunMode, CertEntry, RuntimeInfo } from './constants.js';
 
 // ==================== 类型定义 ====================
 
@@ -74,19 +74,21 @@ export function renderCertList(
         // 左侧的状态圆点：绿色表示已迁移到系统证书目录，灰色表示未成功
         const statusDot = document.createElement('div');
         statusDot.className = `status-dot ${cert.status === 'success' ? 'green' : 'gray'}`;
+        statusDot.title = t(`status_${cert.status}`);
         li.appendChild(statusDot);
 
         // 中间的证书名称文字
         const certName = document.createElement('span');
         certName.textContent = cert.name;
+        certName.title = `${t(`status_${cert.status}`)}\n${cert.sources.join('\n')}`;
         li.appendChild(certName);
 
         // 右侧的删除按钮
         const deleteButton = document.createElement('button');
         deleteButton.textContent = t('delete');
         deleteButton.className = 'delete-button';
-        // cert.name 格式是 "hash: 名称"，用 : 分割取第一部分就是文件名
-        deleteButton.onclick = () => onDelete(cert.name.split(':')[0]!, li);
+        deleteButton.disabled = !cert.canDelete;
+        deleteButton.onclick = () => onDelete(cert.id, li);
         li.appendChild(deleteButton);
 
         list.appendChild(li);
@@ -133,6 +135,7 @@ export function renderModeConfig(
     containerId: string,
     mode: RunMode,
     onSwitch: SwitchModeHandler,
+    runtime?: RuntimeInfo,
 ): void {
     const el = document.getElementById(containerId);
     if (!el) return;
@@ -156,6 +159,7 @@ export function renderModeConfig(
                 ${t('switchTo')}${mode === 'compatible' ? t('builtinMode') : t('compatibleMode')}
             </button>
             <p class="mode-hint">${t('modeHint')}</p>
+            <p id="effectiveModeInfo"></p>
         </div>
 
         <!-- 两种模式的详细说明 -->
@@ -183,8 +187,15 @@ export function renderModeConfig(
     `;
 
     // 绑定切换按钮的点击事件
-    const switchBtn = document.getElementById('switchModeBtn');
+    const effective = document.getElementById('effectiveModeInfo');
+    if (effective) {
+        const active = runtime?.effectiveMode ? modeNames[runtime.effectiveMode] : t('status_unknown');
+        effective.textContent = `${t('effectiveMode')}: ${active}; ${runtime?.state ?? 'unknown'} (${runtime?.reason ?? 'unknown'})`;
+        if (runtime && runtime.sdk >= 36) effective.textContent += `\n${t('builtinUnsupported')}`;
+    }
+    const switchBtn = document.getElementById('switchModeBtn') as HTMLButtonElement | null;
     if (switchBtn) {
+        switchBtn.disabled = !runtime || (mode === 'compatible' && runtime.sdk >= 36);
         switchBtn.onclick = () => {
             // 计算切换后的新模式
             const newMode: RunMode = mode === 'compatible' ? 'builtin' : 'compatible';

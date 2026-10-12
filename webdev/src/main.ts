@@ -25,6 +25,7 @@ import {
     deleteCert,
     getCurrentMode,
     setMode,
+    getRuntimeInfo,
 } from './cert-service.js';
 import {
     renderVersionInfo,
@@ -38,7 +39,7 @@ import type { SwitchModeHandler, DeleteHandler } from './ui-renderer.js';
 import { createModal } from './modal.js';
 import type { ModalController } from './modal.js';
 import { initTheme, bindThemeButtons } from './theme.js';
-import type { RunMode } from './constants.js';
+import type { RunMode, RuntimeInfo } from './constants.js';
 
 // ==================== Tab 名称类型 ====================
 
@@ -56,6 +57,7 @@ let modeLoaded = false;
 let logLoaded = false;
 /** 当前生效的运行模式（与 mode.conf 保持一致） */
 let currentMode: RunMode = 'compatible';
+let currentRuntime: RuntimeInfo | undefined;
 /** 删除确认弹窗（页面初始化时创建一次，不随列表刷新重复创建） */
 let deleteModal: ModalController | null = null;
 
@@ -98,7 +100,7 @@ function switchLanguage(code: LangCode): void {
     // 模式配置页的内容由 JS 动态生成，切换语言后需要重新渲染
     const modeTab = document.getElementById('tab-mode');
     if (modeTab && modeTab.classList.contains('active')) {
-        renderModeConfig('modeConfig', currentMode, switchModeHandler);
+        renderModeConfig('modeConfig', currentMode, switchModeHandler, currentRuntime);
     }
 
     // 更新按钮文字（这些按钮没有 data-i18n，需要手动更新）
@@ -234,7 +236,7 @@ async function loadModeTab(): Promise<void> {
 
     showSkeleton('modeConfig', 2);
     try {
-        currentMode = await getCurrentMode();
+        [currentMode, currentRuntime] = await Promise.all([getCurrentMode(), getRuntimeInfo()]);
         modeLoaded = true;
     } catch (e) {
         console.error('加载模式配置失败:', e);
@@ -242,7 +244,7 @@ async function loadModeTab(): Promise<void> {
     } finally {
         hideSkeleton('modeConfig');
         // 无论读取成功与否都渲染页面（失败时展示默认的兼容模式）
-        renderModeConfig('modeConfig', currentMode, switchModeHandler);
+        renderModeConfig('modeConfig', currentMode, switchModeHandler, currentRuntime);
     }
 }
 
@@ -297,7 +299,7 @@ const switchModeHandler: SwitchModeHandler = (newMode) => {
     setMode(newMode).then(() => {
         currentMode = newMode;
         toast(t('modeSwitched', t(newMode === 'compatible' ? 'compatibleMode' : 'builtinMode')));
-        renderModeConfig('modeConfig', currentMode, switchModeHandler);
+        renderModeConfig('modeConfig', currentMode, switchModeHandler, currentRuntime);
     }).catch((e) => {
         console.error('切换模式失败:', e);
         toast(t('modeSwitchFailed'));

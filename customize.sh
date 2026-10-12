@@ -1,77 +1,34 @@
-##########################################################################################
-#
-# Magisk Module Installer Script
-#
-##########################################################################################
-
-# skip all default installation steps
+#!/system/bin/sh
 SKIPUNZIP=0
-
-# Set what you want to display when installing your module
-
-print_modname() {
-  ui_print " "
-  ui_print "*******************************"
-  ui_print " Supports Android7-17 move cert"
-  ui_print "*******************************"
-  ui_print " "
-    return 0
-}
-
-# Copy/extract your module files into $MODDIR in on_install.
-
-on_install() {
-
-  F_TARGETDIR="$MODPATH/system/etc/security/cacerts/"
-  D_CERTIFICATE="$MODPATH/certificates"
-  APEX_CONSCRYPT_DIR="$MODPATH/apex/com.android.conscrypt/cacerts"
-
-  # mkdir -p "$F_TARGETDIR"
-  # create temp cert
-  D_TMP_CERT=/data/local/tmp/cert
-
-  if [ -f "$D_TMP_CERT" ]; then
-    ui_print "- ${D_TMP_CERT} found"
-  else
-    # 该目录曾经以 0777 创建：任何应用都能往里投一张证书，而 post-fs-data 会把
-    # 它装进系统信任库 —— 等于一条提权路径。现在是仅 root 可访问；若目录已存在
-    # （旧版本创建过）也顺手收紧权限。
-    if [ -d "$D_TMP_CERT" ]; then
-      chmod 700 "$D_TMP_CERT" 2>/dev/null
-    else
-      mkdir -p -m 700 "$D_TMP_CERT"
-    fi
-  fi
-  # ui_print "- mkdir $MODPATH/certificates"
-  # ui_print "- mkdir $F_TARGETDIR"
-  mkdir -p -m 755 "$F_TARGETDIR"
-  mkdir -p -m 755 "$APEX_CONSCRYPT_DIR"
-  mkdir -p -m 755 "$D_CERTIFICATE"
-  mkdir -p -m 755 /data/misc/user/0/cacerts-added
-
-  APEX_VER_NAME=$(basename "$(find /apex -type d -name 'com.android.conscrypt@*' 2>/dev/null | head -n1)")
-  if [ -n "$APEX_VER_NAME" ]; then
-    mkdir -p -m 755 "$MODPATH/apex/$APEX_VER_NAME/cacerts"
-    # ui_print "- Created versioned apex dir: $APEX_VER_NAME"
-  fi
-
-  # Create default mode config
-  MODE_CONF="$MODPATH/mode.conf"
-  if [ ! -f "$MODE_CONF" ]; then
-    echo "mode=compatible" > "$MODE_CONF"
-    ui_print "- Created default mode.conf (compatible mode)"
-  fi
-
-  # Preserve learned certificate names across upgrades
-  # (the packaged cert_names.json only carries the built-in seed names)
-  OLD_CERT_NAMES="/data/adb/modules/MoveCertificate/cert_names.json"
-  if [ -f "$OLD_CERT_NAMES" ]; then
-    cp "$OLD_CERT_NAMES" "$MODPATH/cert_names.json"
-    ui_print "- Preserved existing cert_names.json"
-  fi
-    return 0
-}
-
-# You can add more functions to assist your custom script code
-print_modname
-on_install
+ui_print '- MoveCertificate: validated CA migration (Android 7-17)'
+OLD_MODULE=/data/adb/modules/MoveCertificate
+# Preserve configuration and learned names, never the old certificate cache.
+mode=compatible
+if [ -f "$OLD_MODULE/mode.conf" ]; then
+    saved=$(sed -n 's/^mode=//p' "$OLD_MODULE/mode.conf" | head -n1 | tr -d '\r')
+    case "$saved" in builtin|compatible) mode="$saved" ;; esac
+fi
+sdk=$(getprop ro.build.version.sdk)
+case "$sdk" in ''|*[!0-9]*) abort 'Cannot determine Android SDK' ;; esac
+if [ "$sdk" -ge 36 ] && [ "$mode" = builtin ]; then
+    mode=compatible
+    ui_print '- Android 16+: switching old builtin setting to compatible'
+fi
+printf 'mode=%s\n' "$mode" > "$MODPATH/mode.conf" || abort 'Cannot write mode configuration'
+chmod 600 "$MODPATH/mode.conf"
+if [ "$mode" = compatible ]; then
+    touch "$MODPATH/skip_mount" || abort 'Cannot disable framework mounts'
+fi
+if [ -f "$OLD_MODULE/cert_names.json" ]; then
+    cp "$OLD_MODULE/cert_names.json" "$MODPATH/cert_names.json" || abort 'Cannot preserve name cache'
+fi
+chmod 600 "$MODPATH/cert_names.json"
+# Android owns cacerts-added. Do not create it or alter its permissions/labels.
+if [ ! -e /data/local/tmp/cert ]; then
+    mkdir -m 700 /data/local/tmp/cert || abort 'Cannot create custom certificate input directory'
+elif [ -d /data/local/tmp/cert ] && [ ! -L /data/local/tmp/cert ]; then
+    chown 0:0 /data/local/tmp/cert && chmod 700 /data/local/tmp/cert || abort 'Cannot secure custom certificate directory'
+else
+    abort 'Custom certificate path must be a directory, not a symlink'
+fi
+ui_print '- Existing user certificates are preserved; reboot after installation'

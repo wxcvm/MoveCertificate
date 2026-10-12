@@ -1,3 +1,9 @@
+- v1.6.4 (versionCode 30)：重建原生证书基线、按 DER 指纹去重、分配冲突文件名、原子发布并保留 PEM 兼容性；失败不再误报成功。
+- 挂载按完整内容验证 init/Zygote 命名空间，避免重复 bind；Android 16/17 统一兼容模式。
+- WebUI 区分配置与本次启动实际模式，多用户来源、删除指纹检查、退出状态检查、未验证及排除状态。
+- 单独提供 PanVK 启动器修复包，默认回退原厂 HAL；去掉 arm64 到 32 位目录挂载和 vendor 写回卸载逻辑。实机重启对照待验证。
+- 添加 Shell/WebUI 回归测试与 Actions 双模块打包；自动更新信息在正式发布前保留 v1.6.3。
+---
 - fix(mount): :bug: 适配 Android 17(API 37)：nsenter 兼容 toybox 写法，并用 readlink 校验命名空间真的切换成功；挂载结果自检（模块证书数 vs 生效目录证书数）
 - fix(mount): :bug: 处理 Android 14+ 的 /data/misc/apexdata/com.android.conscrypt/cacerts：该目录非空时 Conscrypt 会忽略只覆盖 APEX 的做法
 - feat(mount): :sparkles: 合并所有用户的 cacerts-added（工作资料/多用户此前被忽略）

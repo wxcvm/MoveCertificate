@@ -32,6 +32,14 @@ export interface LangItem {
 // 如果你要加新文字，在这里添加一个 key，然后给三种语言分别填上翻译即可
 
 const translations: Record<string, TranslationEntry> = {
+    effectiveMode: { 'zh-CN': '本次启动实际模式', en: 'Effective mode this boot', tr: 'Bu açılıştaki etkin mod' },
+    builtinUnsupported: { 'zh-CN': 'Android 16 及以上仅支持兼容模式；旧的内置配置会自动回退。', en: 'Android 16+ uses compatible mode; old builtin settings fall back automatically.', tr: 'Android 16+ uyumlu modu kullanır; eski yerleşik ayarlar otomatik geri döner.' },
+    status_success: { 'zh-CN': '已验证挂载内容', en: 'Mounted contents verified', tr: 'Bağlanan içerik doğrulandı' },
+    status_failed: { 'zh-CN': '挂载验证失败，请查看日志', en: 'Mount verification failed; check logs', tr: 'Bağlama doğrulanamadı; günlüğü kontrol edin' },
+    status_excluded: { 'zh-CN': '按策略排除中间证书', en: 'Intermediate CA excluded by policy', tr: 'Ara CA ilke gereği hariç tutuldu' },
+    status_unverified: { 'zh-CN': '未通过解析验证，原文件已保留', en: 'Certificate validation unavailable or failed; input preserved', tr: 'Sertifika doğrulanamadı; kaynak korundu' },
+    status_removed: { 'zh-CN': '来源已删除，重启后生效', en: 'Input removed; reboot required', tr: 'Kaynak silindi; yeniden başlatma gerekli' },
+    status_unknown: { 'zh-CN': '本次启动尚未验证', en: 'Not verified this boot', tr: 'Bu açılışta henüz doğrulanmadı' },
     // 页面标题
     appTitle: {
         'zh-CN': 'MoveCertificate',
@@ -90,14 +98,14 @@ const translations: Record<string, TranslationEntry> = {
 
     // ==================== 模式配置页 ====================
     currentMode: {
-        'zh-CN': '当前模式',
-        en: 'Current Mode',
-        tr: 'Geçerli Mod',
+        'zh-CN': '配置模式',
+        en: 'Configured Mode',
+        tr: 'Yapılandırılan Mod',
     },
     modeDesc: {
-        'zh-CN': '当前正在使用此模式挂载证书',
-        en: 'Currently using this mode to mount certificates',
-        tr: 'Sertifikalar bu mod kullanılarak bağlanıyor',
+        'zh-CN': '此配置将在下次启动时使用',
+        en: 'This setting applies on the next boot',
+        tr: 'Bu ayar sonraki açılışta uygulanır',
     },
     switchTo: {
         'zh-CN': '切换到 ',
