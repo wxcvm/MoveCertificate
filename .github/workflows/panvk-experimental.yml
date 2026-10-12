@@ -39,8 +39,20 @@ jobs:
           echo 'a7b54a5de87fecd125a17d54f73c446199e72a64  .cache/ndk.zip' | sha1sum --check
           unzip -q .cache/ndk.zip -d .cache
           echo "ANDROID_NDK_ROOT=$GITHUB_WORKSPACE/.cache/android-ndk-r28c" >> "$GITHUB_ENV"
+      - name: Restore native code generation tools
+        id: host_tools
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .cache/panvk-experimental/host-tools
+          key: ubuntu24-panvk-host-llvm18-v1-${{ hashFiles('driver-fix/experimental-build.json', 'driver-fix/patches/**') }}
       - name: Build pinned RC3 with native-buffer fix
         run: bash scripts/build-panvk-experimental.sh
+      - name: Save native code generation tools
+        if: always() && steps.host_tools.outputs.cache-hit != 'true' && hashFiles('.cache/panvk-experimental/host-tools/mesa_clc') != ''
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .cache/panvk-experimental/host-tools
+          key: ${{ steps.host_tools.outputs.cache-primary-key }}
       - name: Upload experimental driver and provenance
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:

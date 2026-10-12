@@ -15,6 +15,17 @@ API="$(read_lock android_api)"
 test -x "$NDK_BIN/aarch64-linux-android$API-clang"
 grep -q "Pkg.Revision = $NDK_VERSION" "$NDK/source.properties"
 mkdir -p "$WORK"
+report_failure() {
+  local status=$?
+  trap - ERR
+  for log in "$WORK"/*.log; do
+    [ -f "$log" ] || continue
+    printf '\nLast output from %s\n' "$log"
+    tail -n 35 "$log"
+  done
+  exit "$status"
+}
+trap report_failure ERR
 
 fetch_exact() {
   local repo="$1" rev="$2" destination="$3"
@@ -53,6 +64,8 @@ assert t.count(old) == 1
 p.write_text(t.replace(old, '#define PANVK_KBASE_RELEASE "' + sys.argv[2] + '"'))
 PY
 
+# Host tools are tied to the source and patch hashes by the workflow cache key.
+if [ ! -x "$WORK/host-tools/mesa_clc" ] || [ ! -x "$WORK/host-tools/vtn_bindgen2" ] || [ ! -x "$WORK/host-tools/panfrost_compile" ]; then
 # Ubuntu 24.04's SPIRV-Tools predates this Mesa's >=2024.1 requirement.
 SPIRV="$WORK/spirv-tools"
 fetch_exact https://github.com/KhronosGroup/SPIRV-Tools.git "$(read_lock spirv_tools_commit)" "$SPIRV"
@@ -75,10 +88,33 @@ meson setup "$WORK/host" "$MESA" \
   -Dllvm=enabled -Dzstd=disabled > "$WORK/host.log" 2>&1
 ninja -j4 -C "$WORK/host" src/compiler/clc/mesa_clc \
   src/compiler/spirv/vtn_bindgen2 src/panfrost/clc/panfrost_compile >> "$WORK/host.log" 2>&1
-mkdir -p "$WORK/host/bin"
+mkdir -p "$WORK/host-tools"
 for tool in src/compiler/clc/mesa_clc src/compiler/spirv/vtn_bindgen2 src/panfrost/clc/panfrost_compile; do
-  ln -s "$WORK/host/$tool" "$WORK/host/bin/$(basename "$tool")"
+  cp "$WORK/host/$tool" "$WORK/host-tools/$(basename "$tool")"
 done
+fi
+
+# PanVK still compiles DRM backends beside Kbase. Link their Android libdrm
+# statically so the resulting ICD never requires a vendor libdrm.so.
+DRM_VERSION="$(read_lock libdrm_version)"
+curl --fail --location --retry 3 "https://dri.freedesktop.org/libdrm/libdrm-$DRM_VERSION.tar.xz" -o "$WORK/libdrm.tar.xz"
+printf '%s  %s\n' "$(read_lock libdrm_archive_sha256)" "$WORK/libdrm.tar.xz" | sha256sum --check
+tar -xJf "$WORK/libdrm.tar.xz" -C "$WORK"
+export PATH="$NDK_BIN:$PATH"
+export PKG_CONFIG_PATH=
+export PKG_CONFIG_LIBDIR="$UPSTREAM/work/android-deps/lib/pkgconfig"
+mkdir -p "$PKG_CONFIG_LIBDIR"
+sed "s/aarch64-linux-android[0-9]*-clang/aarch64-linux-android$API-clang/g" "$UPSTREAM/meson/android-aarch64.ini" > "$WORK/deps-cross.ini"
+meson setup "$WORK/libdrm-build" "$WORK/libdrm-$DRM_VERSION" \
+  --cross-file "$WORK/deps-cross.ini" --prefix "$UPSTREAM/work/android-deps" \
+  --libdir lib -Dbuildtype=release -Ddefault_library=static \
+  -Dintel=disabled -Dradeon=disabled -Damdgpu=disabled -Dnouveau=disabled \
+  -Dvmwgfx=disabled -Domap=disabled -Dexynos=disabled -Dfreedreno=disabled \
+  -Dtegra=disabled -Dvc4=disabled -Detnaviv=disabled -Dudev=false \
+  -Dtests=false -Dinstall-test-programs=false -Dcairo-tests=disabled \
+  -Dman-pages=disabled -Dvalgrind=disabled > "$WORK/libdrm.log" 2>&1
+ninja -j4 -C "$WORK/libdrm-build" install >> "$WORK/libdrm.log" 2>&1
+unset PKG_CONFIG_LIBDIR
 
 # NDK supplies Android's zlib; this .pc describes only that target library.
 # Keep host dependency directories out of the target pkg-config search path.
@@ -91,7 +127,7 @@ Libs: -lz
 Cflags:
 PC
 export PKG_CONFIG_PATH=
-export MESA HOST_TOOLS="$WORK/host/bin" BDIR="$WORK/android" DDIR="$WORK/dist"
+export MESA HOST_TOOLS="$WORK/host-tools" BDIR="$WORK/android" DDIR="$WORK/dist"
 bash "$UPSTREAM/scripts/build-android.sh" \
   --profile "$(read_lock upstream_profile)" --api "$API" --ndk "$NDK" | tee "$WORK/android-summary.log"
 
@@ -103,6 +139,7 @@ grep -q ' HMI$' "$OUT/elf-report.txt"
 cp "$LOCK" "$OUT/build-inputs.json"
 cp "$ROOT"/driver-fix/patches/*.patch "$OUT/"
 cp -R "$ROOT/driver-fix/licenses/Mesa" "$OUT/LICENSE-Mesa"
+cp "$WORK/libdrm.tar.xz" "$OUT/libdrm-$DRM_VERSION-source.tar.xz"
 python3 - "$ROOT" "$WORK" "$NDK" <<'PY'
 from pathlib import Path
 import hashlib, json, subprocess, sys
