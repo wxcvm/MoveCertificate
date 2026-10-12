@@ -8,7 +8,9 @@ trap 'rm -rf "$TEST_ROOT"' EXIT
 getenforce() { echo Disabled; }
 chown() { return 0; }
 stat() {
-    if [ "$1" = -c ] && [ "$2" = '%u' ]; then echo 0; else command stat "$@"; fi
+    if [ "$1" = -c ] && [ "$2" = '%u' ]; then echo 0
+    elif [ "$1" = -c ] && [ "$2" = '%d:%i' ]; then command stat -L "$@"
+    else command stat "$@"; fi
 }
 mount() { echo "$*" >> "$TEST_ROOT/mounts"; return 1; }
 umount() { echo "$*" >> "$TEST_ROOT/unmounts"; return 0; }
@@ -144,4 +146,41 @@ ok 'actual toggle helper atomically saves next-boot selection without changing l
 ( set -- "$user_digest" 1; . "$TEST_ROOT/toggle-helper.sh" ) || fail 'helper re-enable'
 grep -q "^$user_digest$(printf '\t')1$" "$SELECTION_PATH" && [ "$(wc -l < "$SELECTION_PATH")" -eq 1 ] || fail 'helper appended conflicting duplicate choice'
 ok 'actual toggle helper replaces a prior choice rather than appending conflicts'
+# Providers such as Mountify collect only module/system, including APEX.
+# Both layouts must contain the full set and only the currently active alias.
+for version in 34 37; do
+    setup
+    SDK=$version; CURRENT_MODE=builtin
+    mkdir -p "$MODDIR/apex-source/com.android.conscrypt@active/cacerts" "$MODDIR/apex-source/com.android.conscrypt@inactive/cacerts"
+    ln -s com.android.conscrypt@active "$MODDIR/apex-source/com.android.conscrypt"
+    APEX_CERT_DIR="$MODDIR/apex-source/com.android.conscrypt/cacerts"
+    cp "$FIX/native.pem" "$APEX_CERT_DIR/$HASH.0"
+    SYSTEM_SOURCE="$APEX_CERT_DIR"
+    cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+    prepare_cert_store && prepare_builtin || fail 'builtin preparation'
+    for layout in apex system/apex; do
+        for alias in com.android.conscrypt com.android.conscrypt@active; do
+            verify_cert_mount "$MODDIR/$layout/$alias/cacerts" builtin || fail 'builtin incomplete layout'
+            cmp -s "$FIX/native.pem" "$MODDIR/$layout/$alias/cacerts/$HASH.0" || fail 'builtin native byte preservation'
+        done
+        [ ! -d "$MODDIR/$layout/com.android.conscrypt@inactive" ] || fail 'inactive APEX output generated'
+    done
+    # Extra files are allowed for builtin framework merging, but an omitted
+    # selected certificate must fail rather than report a working mount.
+    if mount_in_current_namespace "$MODULE_CERT_DIR"; then fail 'unmounted builtin reported as active'; fi
+    cp "$MODULE_CERT_DIR"/* "$APEX_CERT_DIR/"
+    mount_in_current_namespace "$MODULE_CERT_DIR" || fail 'provider result not verified'
+    rm "$MODDIR/user0/$HASH.0" "$APEX_CERT_DIR/$HASH.1"
+    mkdir -p "$MODDIR/apex-source/com.android.conscrypt@next/cacerts"
+    cp "$FIX/native.pem" "$MODDIR/apex-source/com.android.conscrypt@next/cacerts/$HASH.0"
+    rm "$MODDIR/apex-source/com.android.conscrypt"
+    ln -s com.android.conscrypt@next "$MODDIR/apex-source/com.android.conscrypt"
+    prepare_cert_store && prepare_builtin || fail 'builtin rebuild'
+    for layout in apex system/apex; do
+        [ ! -e "$MODDIR/$layout/com.android.conscrypt/cacerts/$HASH.1" ] || fail 'stale builtin certificate retained'
+        [ ! -d "$MODDIR/$layout/com.android.conscrypt@active" ] || fail 'old APEX alias left for provider mounting'
+        verify_cert_mount "$MODDIR/$layout/com.android.conscrypt@next/cacerts" builtin || fail 'new APEX alias not prepared'
+    done
+    ok "Android SDK $version builtin layouts preserve full CA contents and active aliases; provider result must verify"
+done
 printf 'PASS: %s shell regression cases\n' "$pass"

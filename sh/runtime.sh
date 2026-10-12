@@ -24,10 +24,6 @@ init_paths() {
     fi
     CURRENT_MODE="$CONFIGURED_MODE"
     MODE_REASON=none
-    if [ "$SDK" -ge 36 ] && [ "$CURRENT_MODE" = builtin ]; then
-        CURRENT_MODE=compatible
-        MODE_REASON=builtin_unsupported_sdk
-    fi
     CERT_OPENSSL=$(command -v openssl 2>/dev/null)
     return 0
 }
@@ -270,11 +266,12 @@ prepare_mount_source() {
 }
 
 mount_in_current_namespace() {
-    local source="$1" target source_id target_id targets directory apex_identity
+    local source="$1" target source_id target_id targets directory apex_identity apex_parent
     targets="$SYSTEM_SOURCE"
     if [ "$SDK" -ge 34 ]; then
-        apex_identity=$(stat -c '%d:%i' /apex/com.android.conscrypt) || return 1
-        for directory in /apex/com.android.conscrypt@*; do
+        apex_parent=${APEX_CERT_DIR%/com.android.conscrypt/cacerts}
+        apex_identity=$(stat -c '%d:%i' "$apex_parent/com.android.conscrypt") || return 1
+        for directory in "$apex_parent"/com.android.conscrypt@*; do
             [ -d "$directory/cacerts" ] || continue
             if [ "$(stat -c '%d:%i' "$directory")" = "$apex_identity" ]; then
                 targets="$targets $directory/cacerts"
@@ -298,15 +295,18 @@ mount_in_current_namespace() {
 }
 
 prepare_builtin() {
-    local destination file destinations directory apex_identity
+    local destination file destinations directory apex_identity apex_parent
     clean_builtin_outputs || return 1
     destinations="$MODDIR/system/etc/security/cacerts"
     if [ "$SDK" -ge 34 ]; then
-        destinations="$MODDIR/apex/com.android.conscrypt/cacerts"
-        apex_identity=$(stat -c '%d:%i' /apex/com.android.conscrypt) || return 1
-        for directory in /apex/com.android.conscrypt@*; do
+        # Mountify and other partition-aware providers collect system/apex.
+        # Keep root/apex as well for providers that explicitly support it.
+        destinations="$MODDIR/apex/com.android.conscrypt/cacerts $MODDIR/system/apex/com.android.conscrypt/cacerts"
+        apex_parent=${APEX_CERT_DIR%/com.android.conscrypt/cacerts}
+        apex_identity=$(stat -c '%d:%i' "$apex_parent/com.android.conscrypt") || return 1
+        for directory in "$apex_parent"/com.android.conscrypt@*; do
             [ -d "$directory/cacerts" ] || continue
-            [ "$(stat -c '%d:%i' "$directory")" != "$apex_identity" ] || destinations="$destinations $MODDIR/apex/${directory##*/}/cacerts"
+            [ "$(stat -c '%d:%i' "$directory")" != "$apex_identity" ] || destinations="$destinations $MODDIR/apex/${directory##*/}/cacerts $MODDIR/system/apex/${directory##*/}/cacerts"
         done
     fi
     for destination in $destinations; do
@@ -318,9 +318,12 @@ prepare_builtin() {
 
 clean_builtin_outputs() {
     local directory file
-    for directory in "$MODDIR/system/etc/security/cacerts" "$MODDIR"/apex/*/cacerts; do
+    for directory in "$MODDIR/system/etc/security/cacerts" "$MODDIR"/apex/*/cacerts "$MODDIR"/system/apex/*/cacerts; do
         [ -d "$directory" ] || continue
         for file in "$directory"/*; do [ ! -f "$file" ] || rm -f "$file" || return 1; done
+        # An empty stale APEX alias can still be overlaid by a mount provider.
+        # Prune only empty generated directories; retain unrelated content.
+        rmdir "$directory" "${directory%/cacerts}" 2>/dev/null || :
     done
 }
 

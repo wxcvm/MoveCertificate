@@ -75,9 +75,13 @@ test('policy exclusion and removed sources have distinct states', async () => {
 test('malformed source provenance is rejected', async () => {
     await assert.rejects(service({ manifest: row().replace('/data/misc/user/0/cacerts-added', '/system/etc/security/cacerts') }).api.getInstallCertResults());
 });
-test('Android 17 builtin selection is rejected without configuration writes', async () => {
-    const { api, calls } = service(); await assert.rejects(api.setMode('builtin'));
-    assert.ok(!calls.some(c => c.includes('set-mode.sh')));
+test('Android 14 through 17 builtin selection is saved for mount-provider boot verification', async () => {
+    for (const sdk of [34, 35, 36, 37]) {
+        const { api, calls } = service({ sdk });
+        await api.setMode('builtin');
+        assert.equal(await api.getCurrentMode(), 'builtin');
+        assert.ok(calls.some(c => c.includes('set-mode.sh')));
+    }
 });
 test('comment text is not interpreted as the selected mode', async () => {
     assert.equal(await service({ mode: '# formerly builtin\nmode=compatible' }).api.getCurrentMode(), 'compatible');

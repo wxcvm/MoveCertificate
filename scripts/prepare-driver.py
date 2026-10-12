@@ -57,6 +57,12 @@ validation = {'static_validation': 'passed', 'sha256': upstream['sha256'], **elf
                   'global_hal_result': 'failed',
                   'star_rail': 'repeated SIGSEGV at PC 0 in ColorX constructFragmentShadingRatesInfo; RC3 BuildID confirmed in maps',
                   'oem_comparison': 'user confirmed game opens after RC3 bind removal',
+                  'colorx_bypass_tests': {
+                      'whole_extension_library_mask': 'failed; libvulkan.so+0x35d48 dereferences a null swapchain',
+                      'precise_colorx_exclusion': 'failed after a briefly normal display; same null swapchain, OEM extension library still mapped',
+                      'swapchain_creation_failure_cause': 'not yet isolated',
+                      'temporary_mounts': 'removed; not included in boot configuration or package',
+                  },
                   'quetta': 'user reports intermittent partial corruption; cause not isolated',
                   'custom_icd_loading': 'not tested on this device',
               },

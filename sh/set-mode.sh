@@ -4,10 +4,6 @@ MODDIR=${0%/sh/*}
 init_paths || exit 1
 mode=${1:-}
 case "$mode" in compatible|builtin) ;; *) exit 1 ;; esac
-if [ "$mode" = builtin ] && [ "$SDK" -ge 36 ]; then
-    echo 'builtin is unsupported on Android 16 and newer' >&2
-    exit 1
-fi
 lock_state || exit 1
 had_skip=0
 [ ! -e "$MODDIR/skip_mount" ] || had_skip=1

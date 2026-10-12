@@ -10,14 +10,13 @@ if [ -f "$OLD_MODULE/mode.conf" ]; then
 fi
 sdk=$(getprop ro.build.version.sdk)
 case "$sdk" in ''|*[!0-9]*) abort 'Cannot determine Android SDK' ;; esac
-if [ "$sdk" -ge 36 ] && [ "$mode" = builtin ]; then
-    mode=compatible
-    ui_print '- Android 16+: switching old builtin setting to compatible'
-fi
 printf 'mode=%s\n' "$mode" > "$MODPATH/mode.conf" || abort 'Cannot write mode configuration'
 chmod 600 "$MODPATH/mode.conf"
 if [ "$mode" = compatible ]; then
     touch "$MODPATH/skip_mount" || abort 'Cannot disable framework mounts'
+else
+    rm -f "$MODPATH/skip_mount" || abort 'Cannot enable framework mounts'
+    ui_print '- Builtin mode requires a provider capable of mounting the active CA partition'
 fi
 if [ -f "$OLD_MODULE/cert_names.json" ]; then
     cp "$OLD_MODULE/cert_names.json" "$MODPATH/cert_names.json" || abort 'Cannot preserve name cache'

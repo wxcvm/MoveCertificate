@@ -40,7 +40,7 @@ const translations: Record<string, TranslationEntry> = {
     status_disabled: { 'zh-CN': '本次启动未挂载，原用户证书保留', en: 'Migration disabled this boot; user certificate preserved', tr: 'Bu açılışta taşıma kapalı; kullanıcı sertifikası korundu' },
     status_native: { 'zh-CN': '原生系统 CA，不属于用户证书挂载开关范围', en: 'Native system CA; protected from migration toggles', tr: 'Yerel sistem CA; taşıma anahtarlarından korunur' },
     effectiveMode: { 'zh-CN': '本次启动实际模式', en: 'Effective mode this boot', tr: 'Bu açılıştaki etkin mod' },
-    builtinUnsupported: { 'zh-CN': 'Android 16 及以上仅支持兼容模式；旧的内置配置会自动回退。', en: 'Android 16+ uses compatible mode; old builtin settings fall back automatically.', tr: 'Android 16+ uyumlu modu kullanır; eski yerleşik ayarlar otomatik geri döner.' },
+    builtinMountProvider: { 'zh-CN': 'Android 14 及以上内置模式需要支持 APEX 的挂载框架；KernelSU 需要兼容的元模块。切换后重启，以本次启动校验结果为准。', en: 'On Android 14+, builtin mode needs an APEX-capable mount provider; KernelSU needs a compatible metamodule. Reboot after switching and check the verified boot status.', tr: 'Android 14+ yerleşik mod için APEX destekli bağlama sağlayıcısı; KernelSU için uyumlu meta modül gerekir. Değişiklikten sonra yeniden başlatıp doğrulama sonucunu kontrol edin.' },
     status_success: { 'zh-CN': '已验证挂载内容', en: 'Mounted contents verified', tr: 'Bağlanan içerik doğrulandı' },
     status_failed: { 'zh-CN': '挂载验证失败，请查看日志', en: 'Mount verification failed; check logs', tr: 'Bağlama doğrulanamadı; günlüğü kontrol edin' },
     status_excluded: { 'zh-CN': '按策略排除中间证书', en: 'Intermediate CA excluded by policy', tr: 'Ara CA ilke gereği hariç tutuldu' },
@@ -175,9 +175,9 @@ const translations: Record<string, TranslationEntry> = {
         tr: '📦 Yerleşik Mod (builtin)',
     },
     builtinDesc: {
-        'zh-CN': '利用 Magisk 模块自身的目录结构实现挂载。依赖 Magisk 框架的 Magic Mount 功能，不需要手动执行 mount 命令。',
-        en: 'Uses Magisk module directory structure for mounting. Relies on Magisk Magic Mount, no manual mount commands needed.',
-        tr: 'Bağlama için Magisk modül dizin yapısını kullanır. Magisk Magic Mount özelliğine dayanır, manuel mount komutları gerekmez.',
+        'zh-CN': '由 Root 框架或 KernelSU 元模块挂载模块目录。Android 14 及以上须支持活动 APEX 分区，启动后校验实际证书内容。',
+        en: 'The root framework or KernelSU metamodule mounts module directories. Android 14+ requires active APEX support; certificate contents are verified after mounting.',
+        tr: 'Root çerçevesi veya KernelSU meta modülü modül dizinlerini bağlar. Android 14+ etkin APEX desteği gerektirir; bağlama sonrası sertifika içeriği doğrulanır.',
     },
     builtinSuitableVal: {
         'zh-CN': 'KernelSU、APatch、Magisk 等主流 Root 方案。',
@@ -185,9 +185,9 @@ const translations: Record<string, TranslationEntry> = {
         tr: 'KernelSU, APatch, Magisk ve diğer ana root çözümleri.',
     },
     builtinFeatureVal: {
-        'zh-CN': 'Android14及以上受限于 Magic Mount 元模块挂载方案。需要搭配「Magic Mount Metamodule」+ 扩展分区 apex 可兼容,其它自行测试。',
-        en: 'Limited to Magic Mount meta module mounting scheme. Known to work with "Magic Mount Metamodule" + extended partition apex.',
-        tr: 'Magic Mount meta modül bağlama şemasıyla sınırlıdır. "Magic Mount Metamodule" + genişletilmiş bölüm apex ile uyumlu olduğu bilinmektedir.',
+        'zh-CN': 'Android 14–17 可选择。需要支持 APEX 的提供方，例如启用相应分区的 Mountify 或 Magic Mount 元模块；最终以启动校验为准。',
+        en: 'Selectable on Android 14–17. Requires an APEX-capable provider, such as Mountify or a Magic Mount metamodule with the partition enabled; boot verification determines success.',
+        tr: 'Android 14–17 üzerinde seçilebilir. Mountify veya ilgili bölümü etkin bir Magic Mount meta modülü gibi APEX destekli sağlayıcı gerekir; başarı açılışta doğrulanır.',
     },
 
     // ==================== 运行日志页 ====================

@@ -6,7 +6,8 @@ lock_state || exit 1
 printf '[MoveCertificate] Starting boot %s SDK=%s\n' "$BOOT_ID" "$SDK" > "$LOG_PATH"
 chmod 600 "$LOG_PATH"
 trap 'cp -f "$LOG_PATH" /data/local/tmp/MoveCertificate.log; chmod 600 /data/local/tmp/MoveCertificate.log' EXIT
-# A saved builtin choice may fall back after an Android upgrade.
+# Honour the selected mode; the mount provider and content verification decide
+# whether builtin works. Android version alone does not determine support.
 if [ "$CURRENT_MODE" = compatible ]; then
     touch "$MODDIR/skip_mount" || exit 1
 else

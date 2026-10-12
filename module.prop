@@ -1,7 +1,7 @@
 id=MoveCertificate
 name=MoveCertificate
-version=v1.6.5
-versionCode=31
+version=v1.6.6
+versionCode=32
 author=Contributors
 description=Supports magiskv20.4+/kernelsu/APatch Android 7-17 move certificates
 updateJson=https://raw.githubusercontent.com/wxcvm/MoveCertificate/main/update.json

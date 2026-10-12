@@ -174,8 +174,6 @@ export async function getCurrentMode(): Promise<RunMode> {
 }
 export async function setMode(mode: RunMode): Promise<void> {
     if (mode !== 'compatible' && mode !== 'builtin') throw new Error('非法的运行模式');
-    const runtime = await getRuntimeInfo();
-    if (mode === 'builtin' && runtime.sdk >= 36) throw new Error('Android 16 及以上仅支持兼容模式');
     await run(`sh ${quote(`${MODULE_DIR}/sh/set-mode.sh`)} ${quote(mode)}`);
     if (await getCurrentMode() !== mode) throw new Error('模式配置写入校验失败');
 }

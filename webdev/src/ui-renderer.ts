@@ -225,11 +225,11 @@ export function renderModeConfig(
     if (effective) {
         const active = runtime?.effectiveMode ? modeNames[runtime.effectiveMode] : t('status_unknown');
         effective.textContent = `${t('effectiveMode')}: ${active}; ${runtime?.state ?? 'unknown'} (${runtime?.reason ?? 'unknown'})`;
-        if (runtime && runtime.sdk >= 36) effective.textContent += `\n${t('builtinUnsupported')}`;
+        if (runtime && runtime.sdk >= 34) effective.textContent += `\n${t('builtinMountProvider')}`;
     }
     const switchBtn = document.getElementById('switchModeBtn') as HTMLButtonElement | null;
     if (switchBtn) {
-        switchBtn.disabled = !runtime || (mode === 'compatible' && runtime.sdk >= 36);
+        switchBtn.disabled = !runtime;
         switchBtn.onclick = () => {
             // 计算切换后的新模式
             const newMode: RunMode = mode === 'compatible' ? 'builtin' : 'compatible';

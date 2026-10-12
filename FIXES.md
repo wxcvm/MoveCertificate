@@ -1,4 +1,13 @@
-# v1.6.5 修复与验证
+# v1.6.6 修复与验证
+
+Android 14–17 可以选择内置模式；删除此前仅依据 SDK 禁用或自动回退的判断。
+KernelSU 的内置挂载由元模块提供，且提供者必须支持 APEX。实机 Mountify 2.0.4 的
+`metamount.sh` 支持 APEX，但只收集模块的 `system/` 子目录；原来的模块根目录
+`apex/` 不会被收集。现在同时输出 `system/apex/com.android.conscrypt/cacerts` 和
+`apex/com.android.conscrypt/cacerts`，以及与活动目录身份相同的版本别名。
+重建时清理旧证书和空的旧 APEX 别名目录，避免 OTA 后继续覆盖失效目录。
+Android SDK 34/37 的隔离回归验证完整原生字节、用户证书、活动别名、OTA 清理以及
+缺少用户证书时不能报成功。元模块完整开机挂载仍需设备重启验证。
 
 实机复现了 Android mksh 没有向 BusyBox 传递锁描述符的问题，`flock` 报
 `Bad file descriptor` 导致 WebUI 无法保存选择。显式 `9>&9` 传递同一打开文件描述后，
@@ -14,7 +23,7 @@ AdGuard 中间证书默认排除使用扩展正则，兼容 Android grep；根�
 
 兼容模式对 init 和 Zygote 的挂载命名空间分别验证完整证书内容，校验 namespace 切换实际
 成功，并避免重复堆叠 bind mount。KernelSU/APatch 的 post-mount 阶段和开机完成后复查。
-内置模式交由模块框架挂载后验证；Android 16/17 的旧内置配置自动回退到兼容模式。
+内置模式交由模块框架或元模块挂载后验证；保留用户配置，不按 Android 版本强制改变模式。
 标准 AOSP 的新系统证书入口是 `/apex/com.android.conscrypt/cacerts`，参考
 [Conscrypt 源码](https://android.googlesource.com/platform/external/conscrypt/+/refs/heads/main/platform/src/main/java/org/conscrypt/TrustedCertificateStore.java)。
 不会向尚未确认是活动证书库的任意 apexdata 目录写入证书。
@@ -41,6 +50,14 @@ PC 为 0；恢复原厂 Vulkan 后用户确认可以进入游戏。这个平台�
 浏览器部分花屏由用户报告，尚未单独定位，不能把回退当作 PanVK 内部缺陷修复。
 RC3 仍可作为支持自选驱动的应用的输入，具体应用需单独验证。
 
+进一步的可撤销实机测试没有解决全局兼容：屏蔽整个 64 位 Vulkan 增强库、以及只让
+`isColorxExcludedProcess` 返回 true 的精确绕过，两种方案均消除了原来的 ColorX
+空函数调用，但仍崩溃于系统 `libvulkan.so + 0x35d48`。反汇编该位置为
+`GetSwapchainImagesKHR` 路径解引用传入的 swapchain；寄存器 x1 为 0，说明交换链
+为空。精确绕过时增强库仍在进程映射中；用户先报告能进入且画面正常，随后闪退，
+所以短暂显示不能算运行验证通过。交换链创建失败的具体原因仍需独立定位。
+测试库、游戏日志和私有 OEM 库未提交或打包；所有临时挂载已撤销，开机配置保持原厂。
+
 验证命令（Node 24；Linux/Android shell）：
 
 ```sh
@@ -61,4 +78,4 @@ python3 scripts/package.py
 测试只操作临时夹具，模拟所有挂载操作；锁测试使用真实 flock；测试 CA 不进入安装包。
 Actions 输出三个独立安装包。下载 Actions artifact 后需先解压外层 artifact ZIP，再用
 Root 管理器安装其中的模块 ZIP。`update.json` 仍指向现有正式发布，避免未发布版本触发
-自动更新；v1.6.5 完成实机验证并发布 Release 后再更新此文件。
+自动更新；v1.6.6 完成实机验证并发布 Release 后再更新此文件。
