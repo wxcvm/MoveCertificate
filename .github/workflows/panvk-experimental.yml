@@ -34,17 +34,20 @@ jobs:
           echo "$GITHUB_WORKSPACE/.cache/panvk-venv/bin" >> "$GITHUB_PATH"
           echo /usr/lib/llvm-18/bin >> "$GITHUB_PATH"
       - name: Install pinned Android NDK
-        run: sdkmanager 'ndk;28.2.13676358'
-      - name: Build pinned RC3 with native-buffer fix
         run: |
-          export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/28.2.13676358"
-          bash scripts/build-panvk-experimental.sh
+          curl --fail --location --retry 3 https://dl.google.com/android/repository/android-ndk-r28c-linux.zip -o .cache/ndk.zip
+          echo 'a7b54a5de87fecd125a17d54f73c446199e72a64  .cache/ndk.zip' | sha1sum --check
+          unzip -q .cache/ndk.zip -d .cache
+          echo "ANDROID_NDK_ROOT=$GITHUB_WORKSPACE/.cache/android-ndk-r28c" >> "$GITHUB_ENV"
+      - name: Build pinned RC3 with native-buffer fix
+        run: bash scripts/build-panvk-experimental.sh
       - name: Upload experimental driver and provenance
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: PanVK-RC3-anbfix1-experimental
           path: .cache/panvk-experimental/dist/
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 30
       - name: Upload build diagnostics
         if: always()
@@ -56,4 +59,5 @@ jobs:
             .cache/panvk-experimental/host/meson-logs/meson-log.txt
             .cache/panvk-experimental/android/meson-logs/meson-log.txt
           if-no-files-found: ignore
+          include-hidden-files: true
           retention-days: 14
