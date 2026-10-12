@@ -57,8 +57,12 @@ fi
 # 日志得先找到模块路径）
 print_log "certificates installed"
 if [ "$sdk_version_number" -le 33 ]; then
-    verify_cert_mount $SYSTEM_CERT_DIR
+    if ! verify_cert_mount $SYSTEM_CERT_DIR; then
+        print_log "ERROR: $SYSTEM_CERT_DIR 的证书挂载未生效 —— 模块本次没有起作用，请把本日志反馈"
+    fi
 else
-    verify_cert_mount $APEX_CONSCRYPT_DIR
+    if ! verify_cert_mount $APEX_CONSCRYPT_DIR; then
+        print_log "ERROR: $APEX_CONSCRYPT_DIR 的证书挂载未生效 —— 模块本次没有起作用，请把本日志反馈"
+    fi
 fi
 cp -f "$LOG_PATH" /data/local/tmp/MoveCertificate.log 2>/dev/null

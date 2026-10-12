@@ -58,6 +58,15 @@ read_mode_config() {
             CURRENT_MODE="compatible"
             ;;
     esac
+
+    # SDK >= 36 上强制回落 compatible：builtin 模式要 overlay 模块树里的 apex/，
+    # 可能干扰 apexd 激活（上游 issue #74 会导致开机重启循环），而且实测在 namespace 不共享时
+    # 会"看似成功、实际只在自己的 namespace 里挂上"，表现为证书与网络时好时坏 —— 只打警告
+    # 不足以避免这种静默失效，因此这里直接改判。
+    if [ "$CURRENT_MODE" = "builtin" ] && [ "${sdk_version_number:-0}" -ge 36 ]; then
+        print_log "mode=builtin refused on SDK ${sdk_version_number:-?} (apexd overlay risk + namespace-split silent failure); using compatible"
+        CURRENT_MODE="compatible"
+    fi
     return 0
 }
 
@@ -318,8 +327,16 @@ verify_cert_mount() {
     _vc_want=$(ls -A "$MODULE_CERT_DIR" 2>/dev/null | wc -l)
     _vc_got=$(ls -A "$_vc_target" 2>/dev/null | wc -l)
     print_log "verify $_vc_target: module=$_vc_want effective=$_vc_got"
-    if [ "$_vc_want" -gt 0 ] && [ "$_vc_got" -lt "$_vc_want" ]; then
-        print_log "WARNING: $_vc_target shows fewer certificates than the module ($_vc_got < $_vc_want)"
+    if [ "$_vc_want" -eq 0 ]; then
+        print_log "WARNING: $_vc_target: module has no certificates, nothing to verify"
+        return 1
+    fi
+    # 绑定挂载的语义是"目标看到的**就是**模块里那一份"，因此判据必须是**相等**。
+    # 旧判据只在 effective < module 时才失败，于是"模块 2 个、生效 145 个"（= 完全没挂上）
+    # 会被判为成功 —— 日志写着 certificates installed，实际没生效，只能靠用户反馈才发现。
+    if [ "$_vc_got" -ne "$_vc_want" ]; then
+        print_log "ERROR: $_vc_target is NOT the mounted set (module=$_vc_want effective=$_vc_got)."
+        print_log "ERROR: 该路径的证书挂载未生效，模块本次对这部分没有起作用。"
         return 1
     fi
     return 0
