@@ -322,7 +322,7 @@ async function handleMountSelection(fingerprint: string, enabled: boolean): Prom
         toast(t('mountSelectionSaved'));
         await loadCertList(true);
     } catch (error) {
-        toast(t('mountSelectionFailed'));
+        toast(`${t('mountSelectionFailed')}: ${error instanceof Error ? error.message : String(error)}`);
         throw error;
     }
 }

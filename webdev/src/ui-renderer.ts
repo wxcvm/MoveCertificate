@@ -80,10 +80,20 @@ export function renderCertList(
         li.appendChild(statusDot);
 
         // 中间的证书名称文字
+        const details = document.createElement('div');
+        details.className = 'cert-details';
         const certName = document.createElement('span');
+        certName.className = 'cert-name';
         certName.textContent = cert.name;
         certName.title = `${t(`status_${cert.status}`)}\n${cert.sources.join('\n')}`;
-        li.appendChild(certName);
+        details.appendChild(certName);
+        const state = document.createElement('span');
+        state.className = 'cert-state';
+        state.textContent = t(`status_${cert.status}`);
+        details.appendChild(state);
+        li.appendChild(details);
+        const controls = document.createElement('div');
+        controls.className = 'cert-controls';
 
         const mountLabel = document.createElement('label');
         mountLabel.className = 'cert-mount-toggle' + (cert.canToggle ? '' : ' disabled');
@@ -104,7 +114,7 @@ export function renderCertList(
         mountText.textContent = cert.pendingChange ? t('mountPendingReboot') : t('mountCertificate');
         mountLabel.appendChild(mountText);
         mountLabel.title = `${t('mountSelectionHint')}\n${t(`status_${cert.status}`)}`;
-        li.appendChild(mountLabel);
+        controls.appendChild(mountLabel);
 
         // 右侧的删除按钮
         const deleteButton = document.createElement('button');
@@ -112,7 +122,8 @@ export function renderCertList(
         deleteButton.className = 'delete-button';
         deleteButton.disabled = !cert.canDelete;
         deleteButton.onclick = () => onDelete(cert.id, li);
-        li.appendChild(deleteButton);
+        controls.appendChild(deleteButton);
+        li.appendChild(controls);
 
         list.appendChild(li);
     }

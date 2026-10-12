@@ -3,7 +3,7 @@
 [English](README.en.md) | [Türkçe](README.tr.md)
 
 这是一个`Magisk/KernelSU/APatch`模块，用于将用户 CA 合并到系统证书库，支持 `Android 7-17`。
-Android 16/17 使用兼容模式。v1.6.4 的挂载、证书冲突、WebUI 和驱动模块修复说明见 [FIXES.md](FIXES.md)。
+Android 16/17 使用兼容模式。v1.6.5 的挂载、证书冲突、WebUI 和驱动模块修复说明见 [FIXES.md](FIXES.md)。
 WebUI 可逐张选择用户证书是否迁移，取消挂载保留原证书、重启后生效；AdGuard 根证书默认开启，中间证书默认关闭。
 如果手机是官方镜像,可能就需要借助模块,如果是自己编译的直接内置或者`remount`手动移一下就行了.
 

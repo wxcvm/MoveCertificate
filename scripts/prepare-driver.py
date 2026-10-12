@@ -42,16 +42,25 @@ if output.exists():
 shutil.copytree(ROOT / 'driver-fix', output, ignore=shutil.ignore_patterns('vulkan.mali.so'))
 (output / 'vulkan.mali.so').write_bytes(binary)
 (output / 'driver.sha256').write_text(upstream['sha256'] + '\n')
-(output / 'driver.conf').write_text('enable_global=1\n')
+(output / 'driver.conf').write_text('enable_global=0\n')
 (output / 'module.prop').write_text(
     'id=MTK_D8100_Vulkan1.4.Panvk\nname=Dimensity 8100 PanVK RC3 (Vulkan only)\n'
-    'version=0.1.0-rc3-wrapper1\nversionCode=3\nauthor=wxcvm; upstream zenithblue-oss\n'
-    'description=Verified upstream RC3 arm64 Vulkan HAL; OpenGL/32-bit Vulkan stay OEM. Android 15+. PGKM10 runtime test pending.\n')
+    'version=0.1.0-rc3-wrapper2\nversionCode=4\nauthor=wxcvm; upstream zenithblue-oss\n'
+    'description=RC3 retained for custom loaders; global replacement OFF. PGKM10 Android 17 ColorX crashes with global RC3; OEM Vulkan required.\n')
 (output / 'upstream').mkdir()
 for name, data in manifests.items():
     (output / 'upstream' / name).write_bytes(data)
 validation = {'static_validation': 'passed', 'sha256': upstream['sha256'], **elf,
-              'device_runtime_validation': 'not performed on PGKM10',
+              'device_runtime_validation': {
+                  'device': 'OnePlus PGKM10 / OP5565 / Mali-G610 MC6',
+                  'sdk': 37, 'tested_on': '2026-10-12',
+                  'global_hal_result': 'failed',
+                  'star_rail': 'repeated SIGSEGV at PC 0 in ColorX constructFragmentShadingRatesInfo; RC3 BuildID confirmed in maps',
+                  'oem_comparison': 'user confirmed game opens after RC3 bind removal',
+                  'quetta': 'user reports intermittent partial corruption; cause not isolated',
+                  'custom_icd_loading': 'not tested on this device',
+              },
+              'enable_global_default': False,
               'upstream_manifests': 'Preserved unchanged under upstream/; not PGKM10 runtime results.',
               'open_gl_modified': False, 'vendor_partition_written': False}
 (output / 'VALIDATION.json').write_text(json.dumps(validation, indent=2) + '\n')

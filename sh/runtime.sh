@@ -85,7 +85,7 @@ certificate_enabled() {
     case "$selected" in 1) return 0 ;; 0) return 1 ;; esac
     # Preserve the existing default for AdGuard's personal intermediate only.
     # An explicit WebUI selection overrides this default; root CAs remain on.
-    if [ "$hash" = 47ec1af8 ] && grep -aq 'Guard Personal Intermediate\|AdGuard Intermediate CA' "$der"; then return 1; fi
+    if [ "$hash" = 47ec1af8 ] && grep -aEq 'AdGuard Personal Intermediate|AdGuard Intermediate CA' "$der"; then return 1; fi
     return 0
 }
 
@@ -354,7 +354,10 @@ lock_state() {
     local binary
     exec 9> "$MODDIR/state.lock" || return 1
     for binary in /data/adb/ksu/bin/busybox /data/adb/magisk/busybox /data/adb/ap/bin/busybox; do
-        [ ! -x "$binary" ] || { "$binary" flock -x 9; return $?; }
+        # Android mksh marks persistent descriptors close-on-exec. Explicit
+        # duplication exposes the same open file description to flock while
+        # keeping its lock alive in this shell after flock exits.
+        [ ! -x "$binary" ] || { "$binary" flock -x 9 9>&9; return $?; }
     done
-    flock -x 9
+    flock -x 9 9>&9
 }

@@ -33,6 +33,7 @@ jobs:
         run: |
           node --test tests/*.test.mjs
           sh tests/runtime-test.sh
+          sh tests/lock-test.sh
           sh tests/driver-test.sh
       - name: Shell syntax checks
         run: |

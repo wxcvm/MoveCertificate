@@ -131,7 +131,7 @@ printf 'corrupt\t0\n' > "$SELECTION_PATH"
 if prepare_cert_store; then fail 'malformed selection accepted'; fi
 ok 'malformed selection fails without publishing an unintended trust set'
 # Exercise the real helper body with fixture paths and no root/process locking.
-sed '/^MODDIR=/d; /^\. "$MODDIR\/sh\/runtime.sh"/d; /^init_paths || exit 1/d' "$ROOT/sh/set-cert-enabled.sh" > "$TEST_ROOT/toggle-helper.sh"
+sed '/^MODDIR=/d; /^\. "$MODDIR\/sh\/runtime.sh"/d; /^init_paths /d' "$ROOT/sh/set-cert-enabled.sh" > "$TEST_ROOT/toggle-helper.sh"
 setup
 cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
 prepare_cert_store || fail 'helper baseline'

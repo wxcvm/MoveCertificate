@@ -1,5 +1,6 @@
+- v1.6.5 (versionCode 31)：修复 Android mksh 锁描述符传递导致选择保存失败；证书全名换行及具体错误显示；修复 Android grep 下 AdGuard 中间证书误挂载。
+- PanVK RC3 wrapper2 默认关闭全局替换，并阻止已实测不兼容的 PGKM10 Android 17。星穹铁道恢复原厂 Vulkan 后可进入游戏，RC3 原始库保留供自选驱动应用测试。
 - WebUI 新增逐张用户证书挂载开关，选择跨升级保留、重启生效，取消不删除输入。AdGuard 根证书默认开启，中间证书默认关闭并允许自行开启。
-- 增加官方 PanVK RC3 Android arm64 驱动包：校验二进制与 HAL 接口，仅更新 Vulkan，保留原厂 OpenGL/EGL 和 32 位驱动。本机渲染兼容性待实测。
 - v1.6.4 (versionCode 30)：重建原生证书基线、按 DER 指纹去重、分配冲突文件名、原子发布并保留 PEM 兼容性；失败不再误报成功。
 - 挂载按完整内容验证 init/Zygote 命名空间，避免重复 bind；Android 16/17 统一兼容模式。
 - WebUI 区分配置与本次启动实际模式，多用户来源、删除指纹检查、退出状态检查、未验证及排除状态。

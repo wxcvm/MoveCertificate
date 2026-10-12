@@ -1,4 +1,11 @@
-# v1.6.4 修复与验证
+# v1.6.5 修复与验证
+
+实机复现了 Android mksh 没有向 BusyBox 传递锁描述符的问题，`flock` 报
+`Bad file descriptor` 导致 WebUI 无法保存选择。显式 `9>&9` 传递同一打开文件描述后，
+锁在父 shell 中持续有效；真实双进程测试验证互斥及退出释放。修复适用于证书选择、
+模式切换、删除及启动脚本共用的状态锁。保存失败现在显示实际错误信息。
+证书完整名称换行显示，并将状态和操作分行；不再依赖无法在手机上阅读的悬浮提示。
+AdGuard 中间证书默认排除使用扩展正则，兼容 Android grep；根证书默认仍启用。
 
 证书模块每次启动从当前原生系统库重新构建，保留原生文件原始字节；不再从旧缓存补回
 已经删除的用户证书。所有用户输入按规范 DER 的 SHA-256 去重，同 subject hash 的不同
@@ -27,9 +34,12 @@ WebUI 显示本次 boot ID 对应的实际模式、验证状态和证书来源�
 不会再依据首字节判断任意文件有效，也不会改变 Android 管理的用户证书目录权限。
 
 `driver-fix/` 提供原厂回退包和包含官方 PanVK RC3 的新驱动包，参见该目录说明。
-新包默认启用 64 位 Vulkan 替换，核对 SHA-256、BuildID、HAL/ICD 导出、依赖和最低
-API 35；OpenGL/EGL 及 32 位 Vulkan 保留原厂。RC3 上游记录了 G610 MC3 测试，
-本机 PGKM10/G610 MC6 的全局 HAL 和 Quetta 兼容性尚未实测，见包内 VALIDATION.json。
+新包保留经过 SHA-256、BuildID、HAL/ICD 导出、依赖和最低 API 35 校验的 RC3 原始库，
+默认关闭全局替换，OpenGL/EGL 及 Vulkan 使用原厂。2026-10-12 在 PGKM10/G610 MC6 /
+Android 17 实测，星穹铁道两次崩溃于 ColorX 的 `constructFragmentShadingRatesInfo`，
+PC 为 0；恢复原厂 Vulkan 后用户确认可以进入游戏。这个平台的全局替换已明确阻止。
+浏览器部分花屏由用户报告，尚未单独定位，不能把回退当作 PanVK 内部缺陷修复。
+RC3 仍可作为支持自选驱动的应用的输入，具体应用需单独验证。
 
 验证命令（Node 24；Linux/Android shell）：
 
@@ -40,6 +50,7 @@ npm run typecheck
 cd ..
 node --test tests/*.test.mjs
 sh tests/runtime-test.sh
+sh tests/lock-test.sh
 sh tests/driver-test.sh
 cd webdev
 npm run build
@@ -47,7 +58,7 @@ cd ..
 python3 scripts/package.py
 ```
 
-测试只操作临时夹具，模拟所有挂载操作；测试 CA 的私钥不落盘，测试 CA 不进入安装包。
+测试只操作临时夹具，模拟所有挂载操作；锁测试使用真实 flock；测试 CA 不进入安装包。
 Actions 输出三个独立安装包。下载 Actions artifact 后需先解压外层 artifact ZIP，再用
 Root 管理器安装其中的模块 ZIP。`update.json` 仍指向现有正式发布，避免未发布版本触发
-自动更新；v1.6.4 完成实机验证并发布 Release 后再更新此文件。
+自动更新；v1.6.5 完成实机验证并发布 Release 后再更新此文件。
