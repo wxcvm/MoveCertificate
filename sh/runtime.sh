@@ -122,7 +122,7 @@ prepare_cert_store() {
                 valid_cert_name "$name" || { print_log "SKIP invalid user filename: $input"; continue; }
             else
                 printf '%s\n' "$name" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_.-]*$' || continue
-                owner=$(ls -nd "$input" | awk '{print $3}')
+                owner=$(stat -c '%u' "$input")
                 [ "$owner" = 0 ] || { print_log "SKIP non-root custom file: $input"; continue; }
             fi
             cert_to_der "$input" "$stage/current.der" "$origin"

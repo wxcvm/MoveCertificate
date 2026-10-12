@@ -7,6 +7,9 @@ trap 'rm -rf "$TEST_ROOT"' EXIT
 . "$ROOT/sh/runtime.sh"
 getenforce() { echo Disabled; }
 chown() { return 0; }
+stat() {
+    if [ "$1" = -c ] && [ "$2" = '%u' ]; then echo 0; else command stat "$@"; fi
+}
 mount() { echo "$*" >> "$TEST_ROOT/mounts"; return 1; }
 umount() { echo "$*" >> "$TEST_ROOT/unmounts"; return 0; }
 pass=0
