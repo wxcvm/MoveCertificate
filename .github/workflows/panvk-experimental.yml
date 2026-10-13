@@ -45,7 +45,7 @@ jobs:
         with:
           path: .cache/panvk-experimental/host-tools
           key: ubuntu24-panvk-host-llvm18-v1-${{ hashFiles('driver-fix/experimental-build.json', 'driver-fix/patches/**') }}
-      - name: Build pinned RC3 with native-buffer fix
+      - name: Build pinned RC3 with native-buffer and kbase sync fixes
         run: bash scripts/build-panvk-experimental.sh
       - name: Save native code generation tools
         if: always() && steps.host_tools.outputs.cache-hit != 'true' && hashFiles('.cache/panvk-experimental/host-tools/mesa_clc') != ''
@@ -56,7 +56,7 @@ jobs:
       - name: Upload experimental driver and provenance
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
-          name: PanVK-RC3-anbfix1-experimental
+          name: PanVK-RC3-anbfix2-experimental
           path: .cache/panvk-experimental/dist/
           if-no-files-found: error
           include-hidden-files: true
