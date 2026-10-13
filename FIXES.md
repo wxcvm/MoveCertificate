@@ -61,8 +61,15 @@ RC3 仍可作为支持自选驱动的应用的输入，具体应用需单独验�
 后续独立探针确认 RC3 可以初始化 G610 MC6，报告 API 1.4.363；系统 native-buffer
 内存导入仍误用句柄的第 0 个 `gralloc_extra` FD，真正的 DMA-BUF 在第 1 个。
 同一缓冲区的 AHB 路径成功创建图像、导入并绑定内存。已准备遍历并验证 FD 的源码
-补丁，helper 在本机通过真实导入、元数据拒绝和变化索引测试；完整驱动尚未重建，
-游戏及 Quetta 的全流程兼容仍未通过。详见 [驱动检查记录](driver-fix/INVESTIGATION.md)。
+补丁，helper 在本机通过真实导入、元数据拒绝和变化索引测试。RC3-anbfix1 已完整
+重建，实机 native-buffer 与 AHB 路径均通过 GPU 清屏回读，4096 像素全部正确，
+64 次导入销毁后 FD 数量不变。游戏实际加载 PanVK 后仍卡住或黑屏，进一步复现了
+kbase 错用 DRM 同步复制的错误；RC3-anbfix2 已通过 64 次实机同步导出测试。
+加入同步导入后发现每轮泄漏一个 FD，RC3-anbfix3 进一步修复 waiter 生命周期；
+完整构建及实机回归通过，64 次同步往返 FD 数量保持 23 → 23，像素回读正常。
+第三版的星穹铁道实测确认实际使用新版 Vulkan，用户反馈能进入、有画面，但仍有
+闪烁、重影或错位。游戏及 Quetta 的全流程兼容仍未通过。
+详见 [驱动检查记录](driver-fix/INVESTIGATION.md)。
 
 验证命令（Node 24；Linux/Android shell）：
 
