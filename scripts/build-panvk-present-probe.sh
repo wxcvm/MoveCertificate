@@ -13,9 +13,9 @@ curl --fail --location --retry 3 "$base/apps/panvk-test/app/src/main/cpp/swapcha
 curl --fail --location --retry 3 "$base/tests/dxvk/vulkan/clip-cull/clip_cull_spv.h" -o src/clip_cull_spv.h
 curl --fail --location --retry 3 "$base/LICENSES/MIT.txt" -o assets/upstream-MIT.txt
 printf '%s\n' \
-  'cd3699ac26546292aa27662b58212aee2a0ed63c63daf52ae3ea555c33e67723  src/swapchain.c' \
-  '1941aaf3f57d1e403ef131917623371530407c36347cc7f201cf91014790084e  src/clip_cull_spv.h' \
-  'da0d33f62b0064974023a941540c0474426b3fbd6245adf13694be1b88c8533f  assets/upstream-MIT.txt' | sha256sum -c -
+  '10d7f00a5d6586b6bebd0ec0f17c00614954a29bd1bd092ddfe3ed83fec66acb  src/swapchain.c' \
+  'ef8e0c295e317b282d38098b26784f878cf6b6f8cf383dd422cb74372b48bf38  src/clip_cull_spv.h' \
+  'c1b07dde7a5abd4538a09090876e5309991a284e657311100815eed234cfed4a  assets/upstream-MIT.txt' | sha256sum -c -
 python3 "$root/driver-fix/probe/prepare-source.py" src/swapchain.c
 # Reuse the already built driver, checking its exact bytes before packaging.
 gh run download 38381304473 -R wxcvm/MoveCertificate -n PanVK-RC3-anbfix3-experimental -D driver
