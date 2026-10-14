@@ -4,6 +4,7 @@ import hashlib
 import json
 from zipfile import ZIP_DEFLATED, ZipFile
 import re
+from driver_package import module_files
 
 ROOT = Path(__file__).resolve().parent.parent
 version = re.search(r"^version=(\S+)$", (ROOT / "module.prop").read_text(), re.M)[1]
@@ -36,8 +37,7 @@ for p in ROOT.iterdir():
         module.append((p, p.name))
 write_archive(f"MoveCertificate-{version}.zip", module)
 
-driver = [(p, p.relative_to(ROOT / "driver-fix").as_posix()) for p in (ROOT / "driver-fix").rglob("*")
-          if p.is_file() and p.name != "vulkan.mali.so"]
+driver = list(module_files(ROOT / "driver-fix"))
 driver.extend((p, p.relative_to(ROOT).as_posix()) for p in (ROOT / "META-INF").rglob("*") if p.is_file())
 write_archive("PanVK-guarded-launcher-v1.0.2.zip", driver)
 

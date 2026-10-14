@@ -8,6 +8,7 @@ import shutil
 from urllib.request import Request, urlopen
 from zipfile import ZipFile
 from elf_utils import inspect_elf
+from driver_package import module_files
 
 ROOT = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser()
@@ -39,7 +40,11 @@ if output.is_symlink() or output.resolve().parent != ROOT:
     raise SystemExit('Build output must resolve directly inside the repository')
 if output.exists():
     shutil.rmtree(output)
-shutil.copytree(ROOT / 'driver-fix', output, ignore=shutil.ignore_patterns('vulkan.mali.so'))
+output.mkdir()
+for path, relative in module_files(ROOT / 'driver-fix'):
+    destination = output / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(path, destination)
 (output / 'vulkan.mali.so').write_bytes(binary)
 (output / 'driver.sha256').write_text(upstream['sha256'] + '\n')
 (output / 'driver.conf').write_text('enable_global=0\n')
