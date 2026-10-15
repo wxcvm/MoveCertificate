@@ -148,11 +148,13 @@ out = work / 'dist'
 so = out / 'libvulkan_panfrost.so'
 sha = hashlib.sha256(so.read_bytes()).hexdigest()
 data = json.loads((root / 'driver-fix/experimental-build.json').read_text())
+patch_files = [root / 'driver-fix/patches' / name for name in data['patches']]
+assert len({p.name for p in patch_files}) == len(patch_files), 'Ambiguous patch names in provenance'
 data.update({
     'repository_commit': subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip(),
     'sha256': sha,
     'size_bytes': so.stat().st_size,
-    'patch_sha256': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((root / 'driver-fix/patches').glob('*.patch'))},
+    'patch_sha256': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in patch_files},
     'ndk_properties': (ndk / 'source.properties').read_text(),
     'validation': 'Build and ELF checks only; device and game validation pending',
 })
