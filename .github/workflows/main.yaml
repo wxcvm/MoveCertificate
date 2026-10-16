@@ -35,10 +35,11 @@ jobs:
           sh tests/runtime-test.sh
           sh tests/lock-test.sh
           sh tests/driver-test.sh
+          sh tests/wsi3-launcher-test.sh
       - name: Shell syntax checks
         run: |
           bash -n buildzip.sh
-          for script in *.sh sh/*.sh driver-fix/*.sh tests/*.sh; do sh -n "$script"; done
+          for script in *.sh sh/*.sh driver-fix/*.sh driver-fix/wsi3-module/*.sh tests/*.sh; do sh -n "$script"; done
       - name: Build WebUI
         run: npm run build
         working-directory: webdev
