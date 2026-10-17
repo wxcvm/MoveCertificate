@@ -1,68 +1,75 @@
-# .github/workflows/main.yml
-# 工作流名称
 name: Build and Package
 
-# 触发事件
 on:
   push:
-    # 触发分支
-    branches: [ main ]
+    branches: [ main, 'fix/**' ]
+  pull_request:
+  workflow_dispatch:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 jobs:
-  # 任务名称
   build:
-    # 运行环境
     runs-on: ubuntu-latest
-    # 权限配置
     permissions:
       contents: write
-    # 任务步骤
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: '22'
-          cache: 'npm'
+          node-version: '24'
+          cache: npm
           cache-dependency-path: webdev/package-lock.json
-      
-      - name: Clear parcel cache
-        run: rm -rf webdev/.parcel-cache
-      
       - name: Install dependencies
-        # npm ci 而不是 npm install：严格按 package-lock.json 解析版本，并且跳过
-        # 依赖的安装脚本（SonarCloud githubactions:S8543 / S6505 —— 供应链风险）。
-        run: cd webdev && npm ci --ignore-scripts
-      
-      - name: Build web UI
-        run: cd webdev && npm run build
-      
-      - name: Package module
+        run: npm ci --ignore-scripts
+        working-directory: webdev
+      - name: Typecheck WebUI
+        run: npm run typecheck
+        working-directory: webdev
+      - name: Regression tests
         run: |
-          chmod +x buildzip.sh
-          ./buildzip.sh
-      
-      - name: Get version
-        id: get_version
+          node --test tests/*.test.mjs
+          sh tests/runtime-test.sh
+          sh tests/lock-test.sh
+          sh tests/driver-test.sh
+          sh tests/wsi3-launcher-test.sh
+      - name: Shell syntax checks
         run: |
-          VERSION=$(grep -o '"version": *"[^"]*"' update.json | sed 's/"version": *"\([^"]*\)"/\1/')
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-      
-      - name: Upload artifact
+          bash -n buildzip.sh
+          for script in *.sh sh/*.sh driver-fix/*.sh driver-fix/wsi3-module/*.sh tests/*.sh; do sh -n "$script"; done
+      - name: Build WebUI
+        run: npm run build
+        working-directory: webdev
+      - name: Verify upstream driver and package modules
+        run: |
+          python3 scripts/prepare-driver.py
+          bash buildzip.sh sweb
+      - name: Upload MoveCertificate
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
-          name: MoveCertificate-${{ steps.get_version.outputs.VERSION }}
+          name: MoveCertificate-repair
           path: MoveCertificate-*.zip
+          if-no-files-found: error
           retention-days: 30
-      
-      # 手动创建一个 Release 才会自动把包push上去
-      - name: Upload to Release
+      - name: Upload guarded PanVK launcher
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: PanVK-guarded-launcher
+          path: PanVK-guarded-launcher-*.zip
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload module to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           files: MoveCertificate-*.zip
-          token: ${{ secrets.GITHUB_TOKEN }}
-        
+      - name: Upload new PanVK RC3 driver
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: PanVK-RC3-D8100-Vulkan
+          path: PanVK-RC3-D8100-Vulkan.zip
+          if-no-files-found: error
+          retention-days: 30

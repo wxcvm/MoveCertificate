@@ -40,14 +40,20 @@ jobs:
         run: |
           cd webdev
           npm ci --ignore-scripts
+          npm run typecheck
+          cd ..
+          node --test tests/*.test.mjs
+          sh tests/runtime-test.sh
+          sh tests/driver-test.sh
+          cd webdev
           npm run build
 
       - name: Package module
         id: pack
         run: |
           chmod +x buildzip.sh
-          ./buildzip.sh
-          ZIP=$(ls -1 *.zip | head -1)
+          ./buildzip.sh sweb
+          ZIP=$(ls -1 MoveCertificate-*.zip | head -1)
           if [ -z "$ZIP" ]; then echo "::error::buildzip.sh did not produce a zip"; exit 1; fi
           # 模块 zip 的根目录必须有 module.prop，否则刷入会失败（Magisk/KernelSU 都要求）
           if ! unzip -l "$ZIP" | grep -q ' module.prop$'; then
