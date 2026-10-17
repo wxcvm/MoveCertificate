@@ -58,7 +58,7 @@ jobs:
       - name: Upload experimental driver and provenance
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
-          name: PanVK-RC3-anbfix3-wsi6-diagnostic
+          name: PanVK-RC3-anbfix3-wsi7-diagnostic
           path: .cache/panvk-experimental/dist/
           if-no-files-found: error
           include-hidden-files: true
