@@ -34,19 +34,15 @@ jobs:
           node --test tests/*.test.mjs
           sh tests/runtime-test.sh
           sh tests/lock-test.sh
-          sh tests/driver-test.sh
-          sh tests/wsi3-launcher-test.sh
       - name: Shell syntax checks
         run: |
           bash -n buildzip.sh
-          for script in *.sh sh/*.sh driver-fix/*.sh driver-fix/wsi3-module/*.sh tests/*.sh; do sh -n "$script"; done
+          for script in *.sh sh/*.sh tests/*.sh; do sh -n "$script"; done
       - name: Build WebUI
         run: npm run build
         working-directory: webdev
-      - name: Verify upstream driver and package modules
-        run: |
-          python3 scripts/prepare-driver.py
-          bash buildzip.sh sweb
+      - name: Package modules
+        run: bash buildzip.sh sweb
       - name: Upload MoveCertificate
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
@@ -54,22 +50,8 @@ jobs:
           path: MoveCertificate-*.zip
           if-no-files-found: error
           retention-days: 30
-      - name: Upload guarded PanVK launcher
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
-        with:
-          name: PanVK-guarded-launcher
-          path: PanVK-guarded-launcher-*.zip
-          if-no-files-found: error
-          retention-days: 30
       - name: Upload module to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           files: MoveCertificate-*.zip
-      - name: Upload new PanVK RC3 driver
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
-        with:
-          name: PanVK-RC3-D8100-Vulkan
-          path: PanVK-RC3-D8100-Vulkan.zip
-          if-no-files-found: error
-          retention-days: 30

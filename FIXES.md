@@ -42,34 +42,11 @@ WebUI 显示本次 boot ID 对应的实际模式、验证状态和证书来源�
 具备 `openssl` 且通过 X.509/CA 验证时才会加入；无解析器时保留输入并记为未验证。
 不会再依据首字节判断任意文件有效，也不会改变 Android 管理的用户证书目录权限。
 
-`driver-fix/` 提供原厂回退包和包含官方 PanVK RC3 的新驱动包，参见该目录说明。
-新包保留经过 SHA-256、BuildID、HAL/ICD 导出、依赖和最低 API 35 校验的 RC3 原始库，
-默认关闭全局替换，OpenGL/EGL 及 Vulkan 使用原厂。2026-10-12 在 PGKM10/G610 MC6 /
-Android 17 实测，星穹铁道两次崩溃于 ColorX 的 `constructFragmentShadingRatesInfo`，
-PC 为 0；恢复原厂 Vulkan 后用户确认可以进入游戏。这个平台的全局替换已明确阻止。
-浏览器部分花屏由用户报告，尚未单独定位，不能把回退当作 PanVK 内部缺陷修复。
-RC3 仍可作为支持自选驱动的应用的输入，具体应用需单独验证。
-
-进一步的可撤销实机测试没有解决全局兼容：屏蔽整个 64 位 Vulkan 增强库、以及只让
-`isColorxExcludedProcess` 返回 true 的精确绕过，两种方案均消除了原来的 ColorX
-空函数调用，但仍崩溃于系统 `libvulkan.so + 0x35d48`。反汇编该位置为
-`GetSwapchainImagesKHR` 路径解引用传入的 swapchain；寄存器 x1 为 0，说明交换链
-为空。精确绕过时增强库仍在进程映射中；用户先报告能进入且画面正常，随后闪退，
-所以短暂显示不能算运行验证通过。交换链创建失败的具体原因仍需独立定位。
-测试库、游戏日志和私有 OEM 库未提交或打包；所有临时挂载已撤销，开机配置保持原厂。
-
-后续独立探针确认 RC3 可以初始化 G610 MC6，报告 API 1.4.363；系统 native-buffer
-内存导入仍误用句柄的第 0 个 `gralloc_extra` FD，真正的 DMA-BUF 在第 1 个。
-同一缓冲区的 AHB 路径成功创建图像、导入并绑定内存。已准备遍历并验证 FD 的源码
-补丁，helper 在本机通过真实导入、元数据拒绝和变化索引测试。RC3-anbfix1 已完整
-重建，实机 native-buffer 与 AHB 路径均通过 GPU 清屏回读，4096 像素全部正确，
-64 次导入销毁后 FD 数量不变。游戏实际加载 PanVK 后仍卡住或黑屏，进一步复现了
-kbase 错用 DRM 同步复制的错误；RC3-anbfix2 已通过 64 次实机同步导出测试。
-加入同步导入后发现每轮泄漏一个 FD，RC3-anbfix3 进一步修复 waiter 生命周期；
-完整构建及实机回归通过，64 次同步往返 FD 数量保持 23 → 23，像素回读正常。
-第三版的星穹铁道实测确认实际使用新版 Vulkan，用户反馈能进入、有画面，但仍有
-闪烁、重影或错位。游戏及 Quetta 的全流程兼容仍未通过。
-详见 [驱动检查记录](driver-fix/INVESTIGATION.md)。
+PanVK 驱动子工程（`driver-fix/`、`scripts/build-panvk-*`、`scripts/prepare-driver.py`、
+`scripts/package-wsi3.py`、驱动测试与 4 个 `panvk-*` workflow）已迁移到独立仓库
+[wxcvm/panvk-pgkm10](https://github.com/wxcvm/panvk-pgkm10)，提交历史通过 `git subtree split`
+完整保留。本仓库不再包含驱动源码、补丁、构建或打包流程。
+（原驱动的设备验证记录见 panvk-pgkm10 的 INVESTIGATION.md；本仓库不再保留该文件。）
 
 验证命令（Node 24；Linux/Android shell）：
 
@@ -81,7 +58,6 @@ cd ..
 node --test tests/*.test.mjs
 sh tests/runtime-test.sh
 sh tests/lock-test.sh
-sh tests/driver-test.sh
 cd webdev
 npm run build
 cd ..
@@ -89,6 +65,6 @@ python3 scripts/package.py
 ```
 
 测试只操作临时夹具，模拟所有挂载操作；锁测试使用真实 flock；测试 CA 不进入安装包。
-Actions 输出三个独立安装包。下载 Actions artifact 后需先解压外层 artifact ZIP，再用
+Actions 输出证书模块安装包。下载 Actions artifact 后需先解压外层 artifact ZIP，再用
 Root 管理器安装其中的模块 ZIP。`update.json` 仍指向现有正式发布，避免未发布版本触发
 自动更新；v1.6.6 完成实机验证并发布 Release 后再更新此文件。

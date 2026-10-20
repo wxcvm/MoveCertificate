@@ -7,7 +7,6 @@ case "${1:-}" in
         (cd webdev && npm ci --ignore-scripts && npm run typecheck && npm run build)
         node --test tests/*.test.mjs
         sh tests/runtime-test.sh
-        sh tests/driver-test.sh
         ;;
     *) echo 'Usage: buildzip.sh [sweb|all|auto]' >&2; exit 1 ;;
 esac

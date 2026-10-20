@@ -1,10 +1,7 @@
 """Package separate installable modules. Diagnostics and test CAs are never included."""
 from pathlib import Path
-import hashlib
-import json
 from zipfile import ZIP_DEFLATED, ZipFile
 import re
-from driver_package import module_files
 
 ROOT = Path(__file__).resolve().parent.parent
 version = re.search(r"^version=(\S+)$", (ROOT / "module.prop").read_text(), re.M)[1]
@@ -22,7 +19,7 @@ def write_archive(name, entries):
     with ZipFile(ROOT / name) as archive:
         assert "module.prop" in archive.namelist()
         assert archive.testzip() is None
-        assert not any(p.startswith(("diagnostics/", "tests/", "driver-fix/")) for p in archive.namelist())
+        assert not any(p.startswith(("diagnostics/", "tests/")) for p in archive.namelist())
     print(name)
 
 
@@ -37,15 +34,3 @@ for p in ROOT.iterdir():
         module.append((p, p.name))
 write_archive(f"MoveCertificate-{version}.zip", module)
 
-driver = list(module_files(ROOT / "driver-fix"))
-driver.extend((p, p.relative_to(ROOT).as_posix()) for p in (ROOT / "META-INF").rglob("*") if p.is_file())
-write_archive("PanVK-guarded-launcher-v1.0.2.zip", driver)
-
-new_driver = ROOT / 'driver-dist'
-if new_driver.exists():
-    expected = json.loads((ROOT / 'driver-fix/upstream.json').read_text())['sha256']
-    assert hashlib.sha256((new_driver / 'vulkan.mali.so').read_bytes()).hexdigest() == expected
-    assert (new_driver / 'driver.conf').read_text().strip() == 'enable_global=0'
-    entries = [(p, p.relative_to(new_driver).as_posix()) for p in new_driver.rglob('*') if p.is_file()]
-    entries.extend((p, p.relative_to(ROOT).as_posix()) for p in (ROOT / 'META-INF').rglob('*') if p.is_file())
-    write_archive('PanVK-RC3-D8100-Vulkan.zip', entries)

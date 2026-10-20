@@ -11,6 +11,4 @@ node_modules
 .parcel-cache
 .actrc
 /diagnostics/
-/driver-fix/vulkan.mali.so
-/driver-dist/
 __pycache__/

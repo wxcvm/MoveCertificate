@@ -44,7 +44,6 @@ jobs:
           cd ..
           node --test tests/*.test.mjs
           sh tests/runtime-test.sh
-          sh tests/driver-test.sh
           cd webdev
           npm run build
 

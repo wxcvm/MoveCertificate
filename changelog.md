@@ -1,3 +1,4 @@
+- 基础设施：PanVK 驱动子工程已迁移至独立仓库 https://github.com/wxcvm/panvk-pgkm10（`git subtree split` 保留历史）；本仓库移除驱动源码、驱动打包脚本、驱动测试与 4 个 `panvk-*` workflow，只保留证书模块。
 - v1.6.6 (versionCode 32)：解除 Android 16/17 内置模式的版本限制；同时生成 system/apex 与 apex 布局，让支持 APEX 的元模块能读取证书；仅生成活动 APEX 别名，清理 OTA 后空的旧别名目录。运行成功仍以启动后证书内容验证为准。
 - PanVK 临时测试记录：屏蔽整个 Vulkan 增强库及仅跳过 ColorX 注入均未通过星穹铁道测试；后续崩溃定位到空 swapchain。所有临时绑定已撤销，未加入开机配置。
 - v1.6.5 (versionCode 31)：修复 Android mksh 锁描述符传递导致选择保存失败；证书全名换行及具体错误显示；修复 Android grep 下 AdGuard 中间证书误挂载。
