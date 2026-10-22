@@ -11,4 +11,6 @@ node_modules
 .parcel-cache
 .actrc
 /diagnostics/
+/driver-fix/
+/dist/
 __pycache__/

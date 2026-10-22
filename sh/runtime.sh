@@ -250,6 +250,7 @@ ns_run() {
         actual=$(/system/bin/toybox nsenter -t "$pid" -m -- readlink /proc/self/ns/mnt 2>/dev/null)
         if [ "$actual" = "$target" ]; then /system/bin/toybox nsenter -t "$pid" -m -- "$@"; return $?; fi
     fi
+    printf 'reason=namespace_entry_failed pid=%s namespace=%s\n' "$pid" "$target" >&2
     return 1
 }
 
@@ -328,21 +329,83 @@ clean_builtin_outputs() {
 }
 
 verify_processes() {
-    local pid namespace seen=' ' result=0
-    for pid in 1 $(pidof zygote zygote64 webview_zygote) $(ps -A -o PID,NAME | awk '$2 ~ /_zygote$/ {print $1}'); do
-        namespace=$(readlink "/proc/$pid/ns/mnt") || { result=1; continue; }
-        case "$seen" in *" $namespace "*) continue ;; esac
-        seen="$seen$namespace "
-        if ns_run "$pid" /system/bin/sh "$MODDIR/sh/mount.sh"; then
-            print_log "Verified namespace $namespace pid=$pid"
-        else
-            print_log "ERROR: namespace verification failed pid=$pid"
-            result=1
-        fi
+    local pid namespace init_namespace seen result=0 attempt=0 pids detail status name
+    local expected_namespace_store namespace_script
+    namespace_script=$(cat "$MODDIR/sh/namespace.sh") || return 1
+    expected_namespace_store=$(namespace_store_manifest) || {
+        print_log 'ERROR: cannot snapshot prepared certificate contents'; return 1;
+    }
+    # Never repair from a provider result that is missing or corrupt in init.
+    namespace=$(readlink /proc/1/ns/mnt) || return 1
+    if ! detail=$(check_process_namespace 1 "$namespace" 2>&1); then
+        print_log "ERROR: init namespace verification failed namespace=$namespace $detail"
+        return 1
+    fi
+    print_log "Verified namespace $namespace pid=1"
+    init_namespace=$namespace
+    # Re-snapshot when a zygote exits during verification. A vanished process
+    # is neither evidence of a valid mount nor a permanent failed PID.
+    while [ "$attempt" -lt 3 ]; do
+        attempt=$((attempt + 1))
+        seen=" $init_namespace "
+        result=0
+        pids=$(pidof zygote zygote64) || pids=''
+        [ -n "$pids" ] || { print_log 'ERROR: no primary zygote available'; return 1; }
+        pids="$pids $(pidof webview_zygote 2>/dev/null) $(ps -A -o PID,NAME | awk '$2 ~ /_zygote$/ {print $1}')"
+        for pid in $pids; do
+            namespace=$(readlink "/proc/$pid/ns/mnt" 2>/dev/null) || { result=1; continue; }
+            case "$seen" in *" $namespace "*) continue ;; esac
+            name=$(cat "/proc/$pid/comm" 2>/dev/null)
+            detail=$(check_process_namespace "$pid" "$namespace" 2>&1)
+            status=$?
+            if [ "$status" -eq 0 ]; then
+                seen="$seen$namespace "
+                print_log "Verified namespace $namespace pid=$pid name=$name $detail"
+            else
+                print_log "ERROR: namespace verification failed pid=$pid name=$name namespace=$namespace status=$status $detail"
+                result=1
+            fi
+        done
+        pids=$(pidof zygote zygote64) || pids=''
+        [ -n "$pids" ] || result=1
+        for pid in $pids; do
+            namespace=$(readlink "/proc/$pid/ns/mnt" 2>/dev/null) || { result=1; continue; }
+            case "$seen" in *" $namespace "*) ;; *) result=1 ;; esac
+        done
+        [ "$result" -ne 0 ] || return 0
+        [ "$attempt" -ge 3 ] || sleep 1
     done
-    # At least one zygote must exist, even when it shares init's namespace.
-    [ -n "$(pidof zygote zygote64)" ] || return 1
-    return "$result"
+    return 1
+}
+
+namespace_store_manifest() {
+    local file name digest count=0
+    for file in "$MODULE_CERT_DIR"/*; do
+        name=${file##*/}
+        [ -f "$file" ] && valid_cert_name "$name" || return 1
+        digest=$(sha256sum "$file") || return 1
+        printf '%s %s\n' "${digest%% *}" "$name"
+        count=$((count + 1))
+    done
+    [ "$count" -gt 0 ]
+}
+
+check_process_namespace() {
+    local pid="$1" namespace="$2" output
+    if [ "$CURRENT_MODE" = compatible ]; then
+        ns_run "$pid" /system/bin/sh "$MODDIR/sh/mount.sh" || return 1
+    fi
+    output=$(ns_run "$pid" /system/bin/sh -c "$namespace_script" namespace-check \
+        verify "$SYSTEM_SOURCE" "$expected_namespace_store" "$CURRENT_MODE" "$namespace" 2>&1)
+    if [ "$?" -eq 0 ]; then return 0; fi
+    printf '%s\n' "$output"
+    # builtin mounts supplied to init can be absent from an older zygote
+    # namespace. Propagate only init's already validated store; retain mode.
+    [ "$CURRENT_MODE" = builtin ] && [ "$pid" != 1 ] || return 1
+    case "$output" in *reason=certificate_missing*|*reason=certificate_mismatch*|*reason=directory_missing*) ;;
+        *) return 1 ;; esac
+    ns_run "$pid" /system/bin/sh -c "$namespace_script" namespace-repair \
+        repair "$SYSTEM_SOURCE" "$expected_namespace_store" builtin "$namespace" "/proc/1/root$SYSTEM_SOURCE"
 }
 
 load_runtime_mode() {

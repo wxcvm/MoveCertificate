@@ -1,36 +1,67 @@
-"""Package separate installable modules. Diagnostics and test CAs are never included."""
+"""Package only the MoveCertificate runtime; local artifacts are never inputs."""
 from pathlib import Path
-from zipfile import ZIP_DEFLATED, ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 import re
 
 ROOT = Path(__file__).resolve().parent.parent
-version = re.search(r"^version=(\S+)$", (ROOT / "module.prop").read_text(), re.M)[1]
+RUNTIME_FILES = (
+    'module.prop', 'customize.sh', 'post-fs-data.sh', 'post-mount.sh',
+    'service.sh', 'action.sh', 'uninstall.sh', 'system.prop', 'update.json',
+    'cert_names.json', 'sh/common.sh', 'sh/runtime.sh', 'sh/activate.sh',
+    'sh/mount.sh', 'sh/namespace.sh', 'sh/diagnose.sh', 'sh/delete-cert.sh',
+    'sh/set-cert-enabled.sh', 'sh/set-mode.sh',
+    'META-INF/com/google/android/update-binary',
+    'META-INF/com/google/android/updater-script',
+    'LICENSE', 'README.md', 'README.en.md', 'README.tr.md', 'FIXES.md', 'changelog.md',
+)
 
 
-def write_archive(name, entries):
-    with ZipFile(ROOT / name, "w", ZIP_DEFLATED) as archive:
-        for path, relative in sorted(entries, key=lambda entry: entry[1]):
+def package(root=ROOT):
+    version = re.search(r'^version=(v[0-9]+(?:\.[0-9]+)*)\s*$',
+                        (root / 'module.prop').read_text(), re.M)
+    if not version:
+        raise ValueError('Invalid module version')
+    if not (root / 'webroot/index.html').is_file():
+        raise ValueError('Build webroot before packaging')
+    entries = list(RUNTIME_FILES)
+    for directory in ('webroot', 'README.assets'):
+        for path in (root / directory).rglob('*'):
             if path.is_symlink():
-                raise ValueError(f"Refusing symlink: {path}")
-            data = path.read_bytes()
-            if path.suffix in (".sh", ".prop", ".conf") or path.name == "update-binary":
-                data = data.replace(b"\r\n", b"\n")
-            archive.writestr(relative, data)
-    with ZipFile(ROOT / name) as archive:
-        assert "module.prop" in archive.namelist()
-        assert archive.testzip() is None
-        assert not any(p.startswith(("diagnostics/", "tests/")) for p in archive.namelist())
-    print(name)
+                raise ValueError(f'Refusing symlink: {path}')
+            if path.is_file():
+                if directory == 'webroot' and path.suffix not in ('.html', '.js', '.css'):
+                    raise ValueError(f'Unexpected WebUI output: {path.name}')
+                entries.append(path.relative_to(root).as_posix())
+    output = root / 'dist' / f'MoveCertificate-{version[1]}.zip'
+    output.parent.mkdir(exist_ok=True)
+    temporary = output.with_suffix('.zip.tmp')
+    try:
+        with ZipFile(temporary, 'w', ZIP_DEFLATED) as archive:
+            for relative in sorted(entries):
+                path = root / relative
+                current = path
+                while current != root:
+                    if current.is_symlink():
+                        raise ValueError(f'Refusing symlink: {current}')
+                    current = current.parent
+                data = path.read_bytes()
+                executable = path.suffix == '.sh' or path.name == 'update-binary'
+                if executable or path.suffix in ('.prop', '.conf'):
+                    data = data.replace(b'\r\n', b'\n')
+                info = ZipInfo(relative)
+                info.create_system = 3
+                info.compress_type = ZIP_DEFLATED
+                info.external_attr = (0o100755 if executable else 0o100644) << 16
+                archive.writestr(info, data)
+        with ZipFile(temporary) as archive:
+            if archive.testzip() is not None:
+                raise ValueError('Invalid ZIP')
+        temporary.replace(output)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return output
 
 
-if not (ROOT / "webroot/index.html").is_file():
-    raise SystemExit("Build webroot before packaging")
-module = []
-for directory in ("META-INF", "webroot", "sh", "README.assets"):
-    module.extend((p, p.relative_to(ROOT).as_posix()) for p in (ROOT / directory).rglob("*") if p.is_file())
-for p in ROOT.iterdir():
-    if p.is_file() and ((p.suffix in (".sh", ".md") and p.name != "buildzip.sh") or
-                        p.name in ("LICENSE", "module.prop", "system.prop", "update.json", "cert_names.json")):
-        module.append((p, p.name))
-write_archive(f"MoveCertificate-{version}.zip", module)
+if __name__ == '__main__':
+    print(package())
 

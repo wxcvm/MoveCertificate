@@ -2,7 +2,7 @@
 
 [English](README.en.md) | [中文](README.md)
 
-Kullanıcı sertifikalarını sistem sertifikalarına taşımak için bir `Magisk/KernelSU/APatch` modülü. `Android 7-17` destekler (Android 17 / API 37 için uyarlanmıştır: toybox `nsenter`, bağlama öz-denetimi ve Android 14+ `apexdata` sertifika deposu).
+Kullanıcı CA sertifikalarını sistem deposuna ekleyen bir `Magisk/KernelSU/APatch` modülü. `Android 7-17` destekler. Bu depo yalnızca sertifika modülünü ve WebUI'yi içerir. Android 14+ genellikle etkin Conscrypt APEX deposunu kullanır. Yerleşik mod APEX destekleyen bir bağlama sağlayıcısı gerektirir; açılıştan sonra init ve zygote ad alanları doğrulanır. Doğrulama kapsamı için [FIXES.md](FIXES.md) dosyasına bakın.
 Eğer telefonunuz resmi bir imaja sahipse, bu modüle ihtiyacınız olabilir. Kendi ROM'unuzu derliyorsanız, sertifikayı doğrudan içine ekleyebilir veya `remount` kullanarak manuel olarak taşıyabilirsiniz.
 
 # Kullanım

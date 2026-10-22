@@ -5,7 +5,17 @@ init_paths && load_runtime_mode || exit 1
 trap 'cp -f "$LOG_PATH" /data/local/tmp/MoveCertificate.log; chmod 600 /data/local/tmp/MoveCertificate.log' EXIT
 # Runtime configuration is a snapshot of this boot, not a newly selected mode.
 state=$(sed -n 's/^state=//p' "$RUNTIME")
-[ "$state" = prepared ] || [ "$state" = ready ] || exit 1
+case "$state" in
+    prepared|ready) ;;
+    failed)
+        reason=$(sed -n 's/^reason=//p' "$RUNTIME")
+        case "$reason" in initial_mount_failed|post_mount_failed) ;;
+            *) exit 1 ;; esac
+        print_log "Retrying early mount failure after boot: $reason"
+        ;;
+    *) exit 1 ;;
+esac
+[ "$(cat "$MODDIR/state/boot_id")" = "$BOOT_ID" ] || exit 1
 attempt=0
 while [ "$(getprop sys.boot_completed)" != 1 ] && [ "$attempt" -lt 60 ]; do
     sleep 2

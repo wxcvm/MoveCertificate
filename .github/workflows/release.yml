@@ -32,10 +32,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 与 Build and Package 同一个构建路径：先编译 webroot，再让 buildzip.sh 打包，
-      # 避免出现"测试的产物"和"发布的产物"不是同一份的情况。
-      # 注：ubuntu-latest 自带 Node（20/22），因此不引入 setup-node ——
-      # 任何 Action 一旦写进流水线就必须固定到真实解析过的 SHA，凭空写一个会直接失败。
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: webdev/package-lock.json
+
+      # Match the build workflow's Node version and regression gates.
       - name: Build webroot
         run: |
           cd webdev
@@ -44,6 +47,9 @@ jobs:
           cd ..
           node --test tests/*.test.mjs
           sh tests/runtime-test.sh
+          sh tests/namespace-test.sh
+          sh tests/lock-test.sh
+          python3 -m unittest discover -s tests -p '*_test.py'
           cd webdev
           npm run build
 
@@ -52,7 +58,7 @@ jobs:
         run: |
           chmod +x buildzip.sh
           ./buildzip.sh sweb
-          ZIP=$(ls -1 MoveCertificate-*.zip | head -1)
+          ZIP=$(ls -1 dist/MoveCertificate-*.zip | head -1)
           if [ -z "$ZIP" ]; then echo "::error::buildzip.sh did not produce a zip"; exit 1; fi
           # 模块 zip 的根目录必须有 module.prop，否则刷入会失败（Magisk/KernelSU 都要求）
           if ! unzip -l "$ZIP" | grep -q ' module.prop$'; then
@@ -66,16 +72,23 @@ jobs:
           # module.prop 的 version 通常自带 "v"（v1.6.3），再补一个就成了 vv1.6.3 ——
           # 先把可能的 v/V 前缀去掉再统一加，避免出现双 v 标签。
           VER=$(sed -n 's/^version=//p' module.prop | head -1 | sed 's/^[vV]//')
-          TAG="${{ github.event.inputs.tag }}"
+          TAG="$REQUESTED_TAG"
           if [ -z "$TAG" ]; then
-            if [ -n "${{ github.ref_name }}" ] && [ "${{ github.ref_type }}" = "tag" ]; then
-              TAG="${{ github.ref_name }}"
+            if [ -n "$REF_NAME" ] && [ "$REF_TYPE" = "tag" ]; then
+              TAG="$REF_NAME"
             else
               TAG="v${VER:-0.0}"
             fi
           fi
+          if [ "$TAG" != "v$VER" ]; then
+            echo '::error::Release tag must match module.prop version'; exit 1
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "module version: ${VER:-unknown}; release tag: $TAG"
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
 
       - name: Publish release
         env:

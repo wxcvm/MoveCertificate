@@ -2,7 +2,7 @@ name: Build and Package
 
 on:
   push:
-    branches: [ main, 'fix/**' ]
+    branches: [ main, 'fix/**', 'codex/**' ]
   pull_request:
   workflow_dispatch:
   release:
@@ -33,7 +33,9 @@ jobs:
         run: |
           node --test tests/*.test.mjs
           sh tests/runtime-test.sh
+          sh tests/namespace-test.sh
           sh tests/lock-test.sh
+          python3 -m unittest discover -s tests -p '*_test.py'
       - name: Shell syntax checks
         run: |
           bash -n buildzip.sh
@@ -41,17 +43,17 @@ jobs:
       - name: Build WebUI
         run: npm run build
         working-directory: webdev
-      - name: Package modules
+      - name: Package module
         run: bash buildzip.sh sweb
       - name: Upload MoveCertificate
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: MoveCertificate-repair
-          path: MoveCertificate-*.zip
+          path: dist/MoveCertificate-*.zip
           if-no-files-found: error
           retention-days: 30
       - name: Upload module to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
-          files: MoveCertificate-*.zip
+          files: dist/MoveCertificate-*.zip

@@ -3,7 +3,8 @@
 [English](README.en.md) | [Türkçe](README.tr.md)
 
 这是一个`Magisk/KernelSU/APatch`模块，用于将用户 CA 合并到系统证书库，支持 `Android 7-17`。
-Android 14–17 可选择内置模式，KernelSU 需要能挂载 APEX 的元模块（例如 Mountify）；启动后仍会校验证书内容，不支持的挂载提供者会报告失败。兼容模式无需元模块。v1.6.6 的挂载、证书冲突、WebUI 和驱动模块修复说明见 [FIXES.md](FIXES.md)。
+Android 14–17 可选择内置模式，KernelSU 需要能挂载 APEX 的元模块（例如 Mountify）；启动后会校验 init、Zygote 和 WebView 启动器中的证书内容。内置模式仅在 init 验证成功后补齐缺失的启动器命名空间挂载，失败时保留具体原因。兼容模式无需元模块。修复及验证范围见 [FIXES.md](FIXES.md)。
+本仓库只维护 MoveCertificate 证书模块及 WebUI。
 WebUI 可逐张选择用户证书是否迁移，取消挂载保留原证书、重启后生效；AdGuard 根证书默认开启，中间证书默认关闭。
 如果手机是官方镜像,可能就需要借助模块,如果是自己编译的直接内置或者`remount`手动移一下就行了.
 
@@ -59,6 +60,15 @@ mv cacert.der 02e06844.0
 ```shell
 ./buildzip.sh all
 ```
+构建产物位于 `dist/MoveCertificate-v*.zip`。构建不会安装模块或重启手机。
+安装后完整重启。若仍提示挂载验证失败，可通过 ADB 获取只读诊断：
+
+```sh
+adb shell su -c 'sh /data/adb/modules/MoveCertificate/sh/diagnose.sh'
+adb pull /data/local/tmp/MoveCertificate.log
+```
+
+诊断输出包含进程名称、命名空间和具体缺失/不一致的证书文件名，不输出证书内容。
 # 使用实测
 ![2024-02-19_01.27.27](README.assets/2024-02-19_01.27.27.png)
 
