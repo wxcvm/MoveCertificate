@@ -5,9 +5,7 @@
     "start": "node build.mjs --serve",
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
-    "build_push": "node build.mjs && scp ../webroot/*  root@192.168.1.10:/data/adb/modules/MoveCertificate/webroot/ && echo '✅ 构建并推送完成'",
-    "push": "scp ../webroot/*  root@192.168.1.10:/data/adb/modules/MoveCertificate/webroot/",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test ../tests/*.test.mjs"
   },
   "private": true,
   "dependencies": {

@@ -1,10 +1,20 @@
+- v1.6.7 (versionCode 33)：独立验证命名空间内证书，避免重新加载目标视图中的模块状态；init 验证通过后为缺失的启动器命名空间补齐内置挂载，失败回滚并记录具体原因；进程列表有限重试，启动后的验证可重试早期挂载失败。
+- 仓库仅维护证书模块；安装包采用运行时文件清单，产物位于 dist/，构建不再自动安装或重启。增加命名空间与打包隔离测试。实机重启效果待验证。
+- v1.6.6 (versionCode 32)：解除 Android 16/17 内置模式的版本限制；同时生成 system/apex 与 apex 布局，让支持 APEX 的元模块能读取证书；仅生成活动 APEX 别名，清理 OTA 后空的旧别名目录。运行成功仍以启动后证书内容验证为准。
+- v1.6.5 (versionCode 31)：修复 Android mksh 锁描述符传递导致选择保存失败；证书全名换行及具体错误显示；修复 Android grep 下 AdGuard 中间证书误挂载。
+- WebUI 新增逐张用户证书挂载开关，选择跨升级保留、重启生效，取消不删除输入。AdGuard 根证书默认开启，中间证书默认关闭并允许自行开启。
+- v1.6.4 (versionCode 30)：重建原生证书基线、按 DER 指纹去重、分配冲突文件名、原子发布并保留 PEM 兼容性；失败不再误报成功。
+- 挂载按完整内容验证 init/Zygote 命名空间，避免重复 bind；内置模式需挂载提供者支持活动证书分区。
+- WebUI 区分配置与本次启动实际模式，多用户来源、删除指纹检查、退出状态检查、未验证及排除状态。
+- 添加 Shell/WebUI 回归测试与 Actions 模块打包；自动更新信息在正式发布前保留 v1.6.3。
+---
 - fix(mount): :bug: 适配 Android 17(API 37)：nsenter 兼容 toybox 写法，并用 readlink 校验命名空间真的切换成功；挂载结果自检（模块证书数 vs 生效目录证书数）
-- fix(mount): :bug: 处理 Android 14+ 的 /data/misc/apexdata/com.android.conscrypt/cacerts：该目录非空时 Conscrypt 会忽略只覆盖 APEX 的做法
+- 历史方案曾覆盖 apexdata；当前实现仅使用已确认活动的证书入口，详见 FIXES.md。
 - feat(mount): :sparkles: 合并所有用户的 cacerts-added（工作资料/多用户此前被忽略）
 - chore(release): :bookmark: v1.6.3 (versionCode 29)
 ---
 - fix(mount): :bug: Android 17 (API 37): accept the toybox nsenter syntax and verify with readlink that the namespace really switched; self-check the mount result (module cert count vs effective count)
-- fix(mount): :bug: Handle /data/misc/apexdata/com.android.conscrypt/cacerts on Android 14+ - Conscrypt ignores an APEX-only overlay once that store is populated
+- Historical apexdata handling has been replaced with active-store verification; see FIXES.md.
 - feat(mount): :sparkles: Merge CA certificates from every user (work profiles and secondary users were ignored)
 - chore(release): :bookmark: v1.6.3 (versionCode 29)
 ---
