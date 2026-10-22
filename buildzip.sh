@@ -8,6 +8,7 @@ case "${1:-}" in
         node --test tests/*.test.mjs
         sh tests/runtime-test.sh
         sh tests/namespace-test.sh
+        sh tests/service-test.sh
         sh tests/lock-test.sh
         python3 -m unittest discover -s tests -p '*_test.py'
         ;;

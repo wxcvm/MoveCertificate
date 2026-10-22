@@ -15,7 +15,11 @@ case "$state" in
         ;;
     *) exit 1 ;;
 esac
-[ "$(cat "$MODDIR/state/boot_id")" = "$BOOT_ID" ] || exit 1
+if [ "$(cat "$MODDIR/state/boot_id" 2>/dev/null)" != "$BOOT_ID" ]; then
+    write_runtime failed prepared_boot_mismatch
+    print_log 'ERROR: prepared certificate store does not belong to this boot'
+    exit 1
+fi
 attempt=0
 while [ "$(getprop sys.boot_completed)" != 1 ] && [ "$attempt" -lt 60 ]; do
     sleep 2

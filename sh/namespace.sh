@@ -21,8 +21,9 @@ check_store() {
     [ -d "$directory" ] || { echo "reason=directory_missing path=$directory"; return 1; }
     printf '%s\n' "$expected" | while read -r digest name extra; do
         hash=${name%.*}; sequence=${name##*.}
-        case "$digest:$hash:$sequence" in *[!0-9a-f:]*|*:) echo 'reason=invalid_expected_store'; exit 1 ;; esac
-        case "$sequence" in *[!0-9]*) echo 'reason=invalid_expected_store'; exit 1 ;; esac
+        case "$digest" in ''|*[!0-9a-f]*) echo 'reason=invalid_expected_store'; exit 1 ;; esac
+        case "$hash" in ''|*[!0-9a-f]*) echo 'reason=invalid_expected_store'; exit 1 ;; esac
+        case "$sequence" in ''|*[!0-9]*) echo 'reason=invalid_expected_store'; exit 1 ;; esac
         [ -z "$extra" ] && [ "${#digest}" -eq 64 ] && [ "${#hash}" -eq 8 ] &&
             [ "$name" = "$hash.$sequence" ] || { echo 'reason=invalid_expected_store'; exit 1; }
         [ -f "$directory/$name" ] || { echo "reason=certificate_missing path=$directory name=$name"; exit 1; }
