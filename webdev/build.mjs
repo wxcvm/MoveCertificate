@@ -67,7 +67,7 @@ async function buildJS() {
         target: 'chrome90',
     });
 
-    // 从输出文件名中提取 hash
+    // Use the bundled source as input to the final script transformation.
 
     let jsCode = tempResult.outputFiles[0].text;
 

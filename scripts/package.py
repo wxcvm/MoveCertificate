@@ -56,7 +56,7 @@ def package(root=ROOT):
                     current = current.parent
                 data = path.read_bytes()
                 executable = path.suffix == '.sh' or path.name == 'update-binary'
-                if executable or path.suffix in ('.prop', '.conf', '.md', '.json'):
+                if relative in RUNTIME_FILES:
                     data = data.replace(b'\r\n', b'\n')
                 info = ZipInfo(relative)
                 info.create_system = 3
