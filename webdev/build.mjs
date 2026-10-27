@@ -17,6 +17,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import JavaScriptObfuscator from 'javascript-obfuscator';
+import { createHash } from 'node:crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.argv.includes('--serve');
@@ -67,15 +68,13 @@ async function buildJS() {
     });
 
     // 从输出文件名中提取 hash
-    const jsFileName = path.basename(tempResult.outputFiles[0].path);
-    const jsHash = jsFileName.replace('main.', '').replace('.js', '');
-    // const jsOutPath = tempResult.outputFiles[0].path;
 
     let jsCode = tempResult.outputFiles[0].text;
 
     if (!isDev) {
         // 通过 API 调用混淆器（不走 CLI，无广告）
         const obfuscationResult = JavaScriptObfuscator.obfuscate(jsCode, {
+            seed: 168,
             compact: true,
             controlFlowFlattening: false,
             deadCodeInjection: false,
@@ -87,7 +86,10 @@ async function buildJS() {
         jsCode = obfuscationResult.getObfuscatedCode();
     }
 
-    // 写入最终文件
+    // Name the actual shipped bytes, including deterministic obfuscation.
+    // Changing build options must invalidate a cached script as well.
+    const jsHash = createHash('sha256').update(jsCode).digest('hex').slice(0, 12);
+    const jsFileName = `main.${jsHash}.js`;
     fs.writeFileSync(path.join(OUT_DIR, jsFileName), jsCode);
     console.log(`   📦 JS  → main.${jsHash}.js`);
 

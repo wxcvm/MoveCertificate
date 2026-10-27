@@ -67,7 +67,8 @@ namespace_script=$script; expected_namespace_store=$manifest; CURRENT_MODE=built
 SYSTEM_SOURCE=$DEST
 ns_run() {
     case "$6" in
-        verify) echo "reason=${VERIFY_FAILURE:-certificate_missing}"; return 1 ;;
+        verify) [ "${VERIFY_FAILURE:-}" != none ] || return 0
+            echo "reason=${VERIFY_FAILURE:-certificate_missing}"; return 1 ;;
         repair) echo repair >> "$OPS"; return 0 ;;
         *) return 1 ;;
     esac
@@ -83,6 +84,28 @@ if check_process_namespace 20 z20 > "$WORK/detail"; then fail 'entry failure acc
 [ ! -s "$OPS" ] || fail 'entry failure treated as missing CA'
 unset VERIFY_FAILURE
 ok 'namespace entry errors do not trigger speculative binds'
+for CURRENT_MODE in builtin compatible; do
+    : > "$OPS"; VERIFY_FAILURE=none
+    check_process_namespace 20 z20 || fail 'valid namespace rejected'
+    [ ! -s "$OPS" ] || fail 'valid namespace was remounted'
+    ok "already verified $CURRENT_MODE namespace needs no mount helper"
+done
+: > "$OPS"; VERIFY_FAILURE=certificate_count
+check_process_namespace 20 z20 > "$WORK/detail" || fail 'compatible extra CA not repaired'
+[ "$(cat "$OPS")" = repair ] || fail 'compatible repair missing'
+ok 'compatible content repair also handles an unexpected extra certificate'
+CURRENT_MODE=builtin; unset VERIFY_FAILURE
+
+# An active APEX alias resolving to the same directory must not hash it twice.
+mkdir -p "$WORK/apex/com.android.conscrypt@active/cacerts"
+ln -s com.android.conscrypt@active "$WORK/apex/com.android.conscrypt"
+cp "$WORK/native"/* "$WORK/apex/com.android.conscrypt/cacerts/"
+: > "$OPS"
+prelude='sha256sum() { echo hash >> "$OPS"; command sha256sum "$@"; };'
+sh -c "$prelude
+$script" fixture verify "$WORK/apex/com.android.conscrypt/cacerts" "$manifest" builtin '' || fail 'alias verification'
+[ "$(wc -l < "$OPS")" -eq 2 ] || fail 'same APEX directory hashed more than once'
+ok 'identical active APEX aliases share one content check in the same namespace'
 
 # Test boot orchestration separately from filesystem namespaces.
 mkdir -p "$MODDIR/sh"

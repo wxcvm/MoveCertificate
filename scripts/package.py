@@ -2,6 +2,7 @@
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 import re
+import json
 
 ROOT = Path(__file__).resolve().parent.parent
 RUNTIME_FILES = (
@@ -14,6 +15,10 @@ RUNTIME_FILES = (
     'META-INF/com/google/android/updater-script',
     'LICENSE', 'README.md', 'README.en.md', 'README.tr.md', 'FIXES.md', 'changelog.md',
 )
+DOCUMENTATION_ASSETS = (
+    'README.assets/20221109212126575.png',
+    'README.assets/2024-02-19_01.27.27.png',
+)
 
 
 def package(root=ROOT):
@@ -21,15 +26,20 @@ def package(root=ROOT):
                         (root / 'module.prop').read_text(), re.M)
     if not version:
         raise ValueError('Invalid module version')
+    properties = dict(line.split('=', 1) for line in (root / 'module.prop').read_text().splitlines() if '=' in line)
+    update = json.loads((root / 'update.json').read_text())
+    if (update.get('version') != version[1] or
+            update.get('versionCode') != int(properties['versionCode'])):
+        raise ValueError('Update metadata does not match module version')
     if not (root / 'webroot/index.html').is_file():
         raise ValueError('Build webroot before packaging')
-    entries = list(RUNTIME_FILES)
-    for directory in ('webroot', 'README.assets'):
+    entries = list(RUNTIME_FILES) + list(DOCUMENTATION_ASSETS)
+    for directory in ('webroot',):
         for path in (root / directory).rglob('*'):
             if path.is_symlink():
                 raise ValueError(f'Refusing symlink: {path}')
             if path.is_file():
-                if directory == 'webroot' and path.suffix not in ('.html', '.js', '.css'):
+                if path.suffix not in ('.html', '.js', '.css'):
                     raise ValueError(f'Unexpected WebUI output: {path.name}')
                 entries.append(path.relative_to(root).as_posix())
     output = root / 'dist' / f'MoveCertificate-{version[1]}.zip'
@@ -46,7 +56,7 @@ def package(root=ROOT):
                     current = current.parent
                 data = path.read_bytes()
                 executable = path.suffix == '.sh' or path.name == 'update-binary'
-                if executable or path.suffix in ('.prop', '.conf'):
+                if executable or path.suffix in ('.prop', '.conf', '.md', '.json'):
                     data = data.replace(b'\r\n', b'\n')
                 info = ZipInfo(relative)
                 info.create_system = 3

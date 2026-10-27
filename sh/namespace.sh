@@ -8,7 +8,7 @@ mode=$4
 expected_namespace=${5:-}
 source=${6:-}
 
-case "$action:$mode" in verify:builtin|verify:compatible|repair:builtin) ;; *) exit 1 ;; esac
+case "$action:$mode" in verify:builtin|verify:compatible|repair:builtin|repair:compatible) ;; *) exit 1 ;; esac
 case "$target" in /*) ;; *) exit 1 ;; esac
 [ -n "$expected" ] || { echo 'reason=empty_expected_store'; exit 1; }
 if [ -n "$expected_namespace" ] && [ "$(readlink /proc/self/ns/mnt)" != "$expected_namespace" ]; then
@@ -16,9 +16,14 @@ if [ -n "$expected_namespace" ] && [ "$(readlink /proc/self/ns/mnt)" != "$expect
     exit 1
 fi
 
+verified_directories=' '
 check_store() {
     directory=$1
     [ -d "$directory" ] || { echo "reason=directory_missing path=$directory"; return 1; }
+    directory_identity=$(stat -L -c '%d:%i' "$directory") || return 1
+    # Active APEX aliases often resolve to the identical certificate directory.
+    # Hash that object once per invocation; do not cache across namespaces/boots.
+    case "$verified_directories" in *" $directory_identity "*) return 0 ;; esac
     printf '%s\n' "$expected" | while read -r digest name extra; do
         hash=${name%.*}; sequence=${name##*.}
         case "$digest" in ''|*[!0-9a-f]*) echo 'reason=invalid_expected_store'; exit 1 ;; esac
@@ -39,6 +44,10 @@ check_store() {
         got=$(ls -1 "$directory" | wc -l)
         [ "$want" -eq "$got" ] || { echo "reason=certificate_count path=$directory expected=$want actual=$got"; return 1; }
     fi
+    [ "$(stat -L -c '%d:%i' "$directory")" = "$directory_identity" ] || {
+        echo "reason=directory_changed path=$directory"; return 1;
+    }
+    verified_directories="$verified_directories$directory_identity "
 }
 
 targets=$target

@@ -22,6 +22,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: movecertificate-release
+  cancel-in-progress: false
+
 jobs:
   release:
     name: Build and publish
@@ -59,13 +63,15 @@ jobs:
         run: |
           chmod +x buildzip.sh
           ./buildzip.sh sweb
-          ZIP=$(ls -1 dist/MoveCertificate-*.zip | head -1)
-          if [ -z "$ZIP" ]; then echo "::error::buildzip.sh did not produce a zip"; exit 1; fi
+          VERSION=$(sed -n 's/^version=//p' module.prop | head -1)
+          ZIP="dist/MoveCertificate-$VERSION.zip"
+          if [ ! -f "$ZIP" ]; then echo "::error::buildzip.sh did not produce $ZIP"; exit 1; fi
           # 模块 zip 的根目录必须有 module.prop，否则刷入会失败（Magisk/KernelSU 都要求）
           if ! unzip -l "$ZIP" | grep -q ' module.prop$'; then
             echo "::error::$ZIP has no module.prop at its root"; unzip -l "$ZIP" | head -30; exit 1
           fi
           echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          (cd dist && sha256sum "MoveCertificate-$VERSION.zip" > "MoveCertificate-$VERSION.zip.sha256")
 
       - name: Resolve tag
         id: tag
@@ -84,6 +90,9 @@ jobs:
           if [ "$TAG" != "v$VER" ]; then
             echo '::error::Release tag must match module.prop version'; exit 1
           fi
+          if [ "$(git rev-parse "refs/tags/$TAG^{commit}")" != "$GITHUB_SHA" ]; then
+            echo '::error::Release tag must point to the tested checkout'; exit 1
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "module version: ${VER:-unknown}; release tag: $TAG"
         env:
@@ -98,16 +107,14 @@ jobs:
           ZIP: ${{ steps.pack.outputs.zip }}
         run: |
           set -e
-          NOTES="MoveCertificate 模块包（单个 zip，根目录含 module.prop，可直接在 Magisk / KernelSU 中刷入）。
-          版本：$(sed -n 's/^version=//p' module.prop | head -1)
-          versionCode：$(sed -n 's/^versionCode=//p' module.prop | head -1)"
+          NOTES="releases/$TAG.md"
+          test -f "$NOTES"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$ZIP" --clobber
-            echo "uploaded $ZIP to existing release $TAG"
-          else
-            gh release create "$TAG" "$ZIP" --title "MoveCertificate $TAG" --notes "$NOTES"
-            echo "created release $TAG with $ZIP"
+            echo '::error::Release already exists; published assets must not be overwritten'; exit 1
           fi
+          gh release create "$TAG" "$ZIP" "$ZIP.sha256" --verify-tag --latest \
+            --title "MoveCertificate $TAG" --notes-file "$NOTES"
+          echo "created release $TAG with $ZIP and SHA-256 checksum"
 
       # 同时保留 artifact（方便在 Actions 页直接取），但**不要**把它当成给用户的入口：
       # 它一定是双层 zip。

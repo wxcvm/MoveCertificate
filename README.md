@@ -2,6 +2,8 @@
 
 [English](README.en.md) | [Türkçe](README.tr.md)
 
+[下载正式版](https://github.com/wxcvm/MoveCertificate/releases/latest) · [更新记录](changelog.md)
+
 这是一个`Magisk/KernelSU/APatch`模块，用于将用户 CA 合并到系统证书库，支持 `Android 7-17`。
 Android 14–17 可选择内置模式，KernelSU 需要能挂载 APEX 的元模块（例如 Mountify）；启动后会校验 init、Zygote 和 WebView 启动器中的证书内容。内置模式仅在 init 验证成功后补齐缺失的启动器命名空间挂载，失败时保留具体原因。兼容模式无需元模块。修复及验证范围见 [FIXES.md](FIXES.md)。
 本仓库只维护 MoveCertificate 证书模块及 WebUI。

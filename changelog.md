@@ -79,3 +79,6 @@
 ---
 - build(webroot): :fire: 识别证书优化
 - build(webroot): :fire: Recognition Certificate Optimization
+- v1.6.8 (versionCode 34)：两种模式均先校验后修复，已生效的命名空间不再重复调用挂载脚本；相同 APEX 目录别名共享本次内容校验；诊断显示真实启动器名称并去重。
+- 修复兼容模式子命名空间仍依赖模块目录的问题；发布包只收集明确文档图片，检查更新元数据一致；WebUI 固定混淆种子并按最终字节命名缓存资源。
+- Android 17 实机原生 Shell 回归、五个活动命名空间只读校验及隔离命名空间真实 bind 测试通过。内置模式完整开机验收仍待验证。正式 Release 附 SHA-256，已发布附件禁止覆盖。

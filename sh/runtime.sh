@@ -353,9 +353,12 @@ verify_processes() {
         [ -n "$pids" ] || { print_log 'ERROR: no primary zygote available'; return 1; }
         pids="$pids $(pidof webview_zygote 2>/dev/null) $(ps -A -o PID,NAME | awk '$2 ~ /_zygote$/ {print $1}')"
         for pid in $pids; do
-            namespace=$(readlink "/proc/$pid/ns/mnt" 2>/dev/null) || { result=1; continue; }
+            namespace=$(readlink "/proc/$pid/ns/mnt" 2>/dev/null) || {
+                print_log "Retry: process disappeared before namespace check pid=$pid"
+                result=1; continue;
+            }
             case "$seen" in *" $namespace "*) continue ;; esac
-            name=$(cat "/proc/$pid/comm" 2>/dev/null)
+            name=$(process_name "$pid")
             detail=$(check_process_namespace "$pid" "$namespace" 2>&1)
             status=$?
             if [ "$status" -eq 0 ]; then
@@ -392,20 +395,33 @@ namespace_store_manifest() {
 
 check_process_namespace() {
     local pid="$1" namespace="$2" output
-    if [ "$CURRENT_MODE" = compatible ]; then
-        ns_run "$pid" /system/bin/sh "$MODDIR/sh/mount.sh" || return 1
-    fi
     output=$(ns_run "$pid" /system/bin/sh -c "$namespace_script" namespace-check \
         verify "$SYSTEM_SOURCE" "$expected_namespace_store" "$CURRENT_MODE" "$namespace" 2>&1)
     if [ "$?" -eq 0 ]; then return 0; fi
     printf '%s\n' "$output"
-    # builtin mounts supplied to init can be absent from an older zygote
-    # namespace. Propagate only init's already validated store; retain mode.
-    [ "$CURRENT_MODE" = builtin ] && [ "$pid" != 1 ] || return 1
+    # A correct store needs no bind or dependency on the module directory in
+    # either mode. Only an explicit content failure permits a repair attempt.
     case "$output" in *reason=certificate_missing*|*reason=certificate_mismatch*|*reason=directory_missing*) ;;
+        *reason=certificate_count*) [ "$CURRENT_MODE" = compatible ] || return 1 ;;
         *) return 1 ;; esac
+    if [ "$pid" = 1 ]; then
+        [ "$CURRENT_MODE" = compatible ] || return 1
+        ns_run 1 /system/bin/sh "$MODDIR/sh/mount.sh" || return 1
+        ns_run 1 /system/bin/sh -c "$namespace_script" namespace-check \
+            verify "$SYSTEM_SOURCE" "$expected_namespace_store" compatible "$namespace"
+        return $?
+    fi
+    # Propagate only init's already validated store into a missing child view.
+    # The standalone helper revalidates it without reopening module files.
     ns_run "$pid" /system/bin/sh -c "$namespace_script" namespace-repair \
-        repair "$SYSTEM_SOURCE" "$expected_namespace_store" builtin "$namespace" "/proc/1/root$SYSTEM_SOURCE"
+        repair "$SYSTEM_SOURCE" "$expected_namespace_store" "$CURRENT_MODE" "$namespace" "/proc/1/root$SYSTEM_SOURCE"
+}
+
+process_name() {
+    local name
+    name=$(tr '\000' '\n' 2>/dev/null < "/proc/$1/cmdline" | head -n1)
+    [ -n "$name" ] || name=$(cat "/proc/$1/comm" 2>/dev/null)
+    printf '%s\n' "$name"
 }
 
 load_runtime_mode() {
