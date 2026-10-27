@@ -1,370 +1,179 @@
-/**
- * MoveCertificate — 数据服务层
- * 这个文件负责所有"获取数据"和"操作数据"的工作
- * 比如读证书列表、删证书、查日志、读写模式配置等
- * 
- * 约定：
- *   1. 这个文件不操作页面 DOM，也不显示任何提示（toast），只处理数据
- *   2. 操作失败时抛出异常（带中文错误信息），由调用方决定如何提示用户
- *   3. "没有数据"与"操作失败"是两回事：前者返回空结果，后者抛异常
- */
-
 import { exec } from 'kernelsu';
 import {
-    CERT_HIGH_SYSTEM,
-    CERT_LOW_SYSTEM,
-    CERT_USER_SYSTEM,
-    CERT_MODULE,
-    ALL_CERT_PATHS,
-    MODULE_PROP_PATH,
-    INSTALL_LOG_PATH,
-    MODE_CONF_PATH,
-    CERT_NAME_CACHE_PATH,
-    CERT_QUERY_API,
-    CERT_MODULE_APEX_NUM_GLOB,
-    SYSTEM_CERTS_LIST_PATH,
+    MODULE_DIR, CERT_HIGH_SYSTEM, CERT_LOW_SYSTEM, CERT_MODULE, MODULE_PROP_PATH,
+    INSTALL_LOG_PATH, MODE_CONF_PATH, CERT_NAME_CACHE_PATH, CERT_QUERY_API,
+    MANIFEST_PATH, RUNTIME_PATH, STATE_BOOT_PATH, SELECTION_PATH,
 } from './constants.js';
-import type { RunMode, CertEntry } from './constants.js';
+import type { RunMode, CertEntry, CertStatus, RuntimeInfo } from './constants.js';
 
-// ==================== 类型定义 ====================
-
-/** exec 命令的返回结果 */
-interface ExecResult {
-    errno: number;
-    stdout: string;
-    stderr: string;
+interface ExecResult { errno: number; stdout: string; stderr: string; }
+const quote = (value: string): string => `'${value.split("'").join("'\\''")}'`;
+async function run(command: string): Promise<string> {
+    const result = await exec(command) as ExecResult;
+    if (result.errno !== 0) throw new Error(result.stderr.trim() || `命令执行失败 (${result.errno})`);
+    return String(result.stdout).trim();
 }
-
-/** 远程证书识别 API 的响应 */
-interface CertQueryResponse {
-    result?: string;
-    error?: string;
+async function optionalFile(path: string): Promise<string | null> {
+    // Missing files are normal before the first boot; permission errors are not.
+    const result = await exec(`if [ ! -e ${quote(path)} ]; then printf '__MISSING__'; else cat ${quote(path)}; fi`) as ExecResult;
+    if (result.errno !== 0) throw new Error(`读取文件失败: ${path}`);
+    const output = String(result.stdout).trim();
+    return output === '__MISSING__' ? null : output;
 }
-
-// ==================== 基础文件操作 ====================
-
-/**
- * 列出指定目录下的所有文件名
- * 相当于在终端执行 ls /some/path
- * 
- * @throws 命令执行失败（目录不存在、权限不足等）时抛出异常
- */
 export async function getFileList(path: string): Promise<string[]> {
-    const { errno, stdout } = await exec(`ls '${path}'`) as ExecResult;
-    if (errno !== 0) {
-        throw new Error(`列出目录失败: ${path}`);
-    }
-    // 按换行拆分输出，过滤掉空行
-    return String(stdout).trim().split('\n').filter(Boolean);
+    return (await run(`ls -1 ${quote(path)}`)).split('\n').filter(Boolean);
 }
-
-/**
- * 读取文件内容并转为 base64 编码
- * 证书文件是二进制格式，用 base64 方便传输和比较
- * 
- * @throws 命令执行失败时抛出异常
- */
 export async function readFileBase64(path: string): Promise<string> {
-    const { errno, stdout } = await exec(`cat '${path}' | base64`) as ExecResult;
-    if (errno !== 0) {
-        throw new Error(`读取文件失败: ${path}`);
-    }
-    return String(stdout).trim();
+    // Redirection fails before base64 starts when the source is unreadable.
+    return run(`base64 < ${quote(path)}`);
 }
-
-// ==================== 证书识别 ====================
-
-/**
- * 向远程服务器查询证书名称（尽力而为，失败返回 null，不中断主流程）
- * 设置 5 秒超时，避免网络不好时卡太久
- */
-async function requestCertName(base64Data: string): Promise<string | null> {
+async function readCache(): Promise<Record<string, string>> {
+    const data = await optionalFile(CERT_NAME_CACHE_PATH);
+    if (!data) return {};
     try {
-        // AbortController 用于实现超时控制
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-
+        const parsed: unknown = JSON.parse(data);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+        return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+    } catch { return {}; }
+}
+let cacheWrites = Promise.resolve();
+function saveName(fingerprint: string, name: string): void {
+    cacheWrites = cacheWrites.then(async () => {
+        const cache = await readCache();
+        cache[fingerprint] = name;
+        const bytes = new TextEncoder().encode(JSON.stringify(cache));
+        const data = btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join(''));
+        const suffix = Array.from(crypto.getRandomValues(new Uint32Array(4)), n => n.toString(16)).join('-');
+        const temporary = `${CERT_NAME_CACHE_PATH}.webui-${suffix}.tmp`;
+        try {
+            await run(`printf '%s' ${quote(data)} | base64 -d > ${quote(temporary)} && chmod 600 ${quote(temporary)} && mv ${quote(temporary)} ${quote(CERT_NAME_CACHE_PATH)}`);
+        } finally {
+            await run(`rm -f ${quote(temporary)}`);
+        }
+    }).catch(error => console.error('写入证书名称缓存失败:', error));
+}
+export async function getCertName(path: string, fingerprint?: string): Promise<string> {
+    // Legacy subject-hash entries cannot identify a renewed or colliding CA.
+    if (fingerprint) {
+        const cache = await readCache();
+        if (cache[fingerprint]) return cache[fingerprint];
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    try {
+        const data = await readFileBase64(path);
         const response = await fetch(CERT_QUERY_API, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: 'cert base64', data: base64Data }),
-            signal: controller.signal,
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: 'cert base64', data }), signal: controller.signal,
         });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            throw new Error('服务器响应异常');
+        if (!response.ok) return 'Unknown';
+        const result: unknown = await response.json();
+        if (!result || typeof result !== 'object' || !('result' in result) || typeof result.result !== 'string') return 'Unknown';
+        if (fingerprint) saveName(fingerprint, result.result);
+        return result.result;
+    } catch { return 'Unknown'; } finally { clearTimeout(timer); }
+}
+export async function getRuntimeInfo(): Promise<RuntimeInfo> {
+    const sdk = Number(await run('getprop ro.build.version.sdk'));
+    if (!Number.isInteger(sdk) || sdk < 24) throw new Error('获取系统版本失败');
+    const bootId = await run('cat /proc/sys/kernel/random/boot_id');
+    const data = await optionalFile(RUNTIME_PATH);
+    const values = Object.fromEntries((data ?? '').split('\n').map(line => {
+        const position = line.indexOf('=');
+        return position < 0 ? [line, ''] : [line.slice(0, position), line.slice(position + 1)];
+    }));
+    const current = values.boot_id === bootId;
+    const mode = current ? values.effective_mode : null;
+    return {
+        sdk, bootId, effectiveMode: mode === 'builtin' || mode === 'compatible' ? mode : null,
+        state: current ? values.state ?? 'unknown' : 'unknown',
+        reason: current ? values.reason ?? 'none' : 'no_current_boot_status',
+        modeReason: current ? values.mode_reason ?? 'none' : 'none',
+    };
+}
+interface SourceRow { fingerprint: string; target: string; source: string; state: string; }
+function parseManifest(data: string): SourceRow[] {
+    return data.split('\n').filter(Boolean).map(line => {
+        const [fingerprint, target, source, state] = line.split('\t');
+        if (!fingerprint || !/^[0-9a-f]{64}$/.test(fingerprint) || !target ||
+            (target !== '-' && !/^[0-9a-f]{8}\.[0-9]+$/.test(target)) || !source ||
+            !/^\/data\/misc\/user\/\d+\/cacerts-added\/[0-9a-f]{8}\.\d+$|^\/data\/local\/tmp\/cert\/[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(source) ||
+            !state || !['pending', 'excluded', 'disabled', 'native', 'unverified', 'removed'].includes(state)) {
+            throw new Error('证书来源记录损坏，请重启后重试');
         }
-
-        const responseData: CertQueryResponse = await response.json();
-        if (responseData.error) {
-            console.error('服务器返回错误:', responseData.error);
-            return null;
-        }
-
-        return responseData.result ?? null;
-    } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') {
-            console.error('查询证书名称超时（超过5秒）');
-        } else {
-            console.error('查询证书名称失败:', err);
-        }
-        return null;
-    }
+        return { fingerprint, target, source, state };
+    });
 }
-
-/**
- * 从缓存文件读取已识别的证书名称映射（hash → 名称）
- * 文件随模块打包内置了常见证书名称，运行时会追加远程 API 学到的名称
- * 文件不存在或内容损坏时返回空对象（当作无缓存）
- */
-async function readCertNameCache(): Promise<Record<string, string>> {
-    const { errno, stdout } = await exec(`cat '${CERT_NAME_CACHE_PATH}'`) as ExecResult;
-    if (errno !== 0) {
-        return {};
-    }
-    try {
-        const parsed = JSON.parse(String(stdout).trim()) as Record<string, string>;
-        return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch {
-        return {};
-    }
-}
-
-/**
- * 把证书名称映射写回缓存文件
- * 先转 UTF-8 再 base64 后写入，避免名称里出现引号等 shell 特殊字符破坏命令
- */
-async function writeCertNameCache(cache: Record<string, string>): Promise<void> {
-    const bytes = new TextEncoder().encode(JSON.stringify(cache));
-    let binary = '';
-    for (const b of bytes) {
-        binary += String.fromCharCode(b);
-    }
-    await exec(`echo '${btoa(binary)}' | base64 -d > '${CERT_NAME_CACHE_PATH}'`);
-}
-
-// 串行化缓存写入：多个并发查询同时写文件时，后写会覆盖先写，导致缓存丢失
-let cacheWriteChain: Promise<void> = Promise.resolve();
-
-/**
- * 记录一条远程识别结果到缓存（合并写入，不覆盖已有条目）
- * 写入失败只打印日志，不影响主流程
- */
-function saveCertNameToCache(key: string, name: string): void {
-    cacheWriteChain = cacheWriteChain
-        .then(async () => {
-            const cache = await readCertNameCache();
-            cache[key] = name;
-            await writeCertNameCache(cache);
-        })
-        .catch((err) => {
-            console.error('写入证书名称缓存失败:', err);
-        });
-}
-
-/**
- * 从证书文件路径中提取文件名 hash（如 "9a5ba575.0" → "9a5ba575"）
- * 提取不到时返回 null（此时不缓存）
- */
-function getCertHashKey(path: string): string | null {
-    const fileName = path.split('/').pop() ?? '';
-    return /^([0-9a-fA-F]{8})\./.exec(fileName)?.[1]?.toLowerCase() ?? null;
-}
-
-/**
- * 识别证书名称
- * 采用两级查找策略，按优先级依次尝试：
- *   第一级：查本地缓存（打包内置 + 上次远程查询已识别的名称）
- *   第二级：读取证书内容，交给远程 API 查询，成功后写入缓存
- * 识别失败返回 'Unknown'，不影响证书列表展示
- */
-export async function getCertName(path: string): Promise<string> {
-    const hashKey = getCertHashKey(path);
-
-    // 第一级：查本地缓存
-    if (hashKey) {
-        const cache = await readCertNameCache();
-        const cached = cache[hashKey];
-        if (cached) {
-            return cached;
-        }
-    }
-
-    try {
-        // 第二级：读取证书内容，交给远程 API 查询
-        const certText = await readFileBase64(path);
-        const result = await requestCertName(certText);
-        if (result) {
-            if (hashKey) {
-                saveCertNameToCache(hashKey, result);
-            }
-            return result;
-        }
-    } catch (err) {
-        console.error('识别证书名称失败:', err);
-    }
-
-    return 'Unknown';
-}
-
-// ==================== 证书管理 ====================
-
-/**
- * 删除指定证书文件
- * 因为证书可能被复制到了多个目录，所以需要同时从所有位置删除
- * 
- * 安全与可靠性：
- *   1. 删除前校验文件名格式（只允许 "hash.序号"），防止 shell 命令注入
- *   2. 删除后校验核心目录中文件是否真的消失，未消失则抛出异常
- * 
- * @throws 文件名不合法或删除未生效时抛出异常
- */
-export async function deleteCert(file: string): Promise<void> {
-    // 证书文件名必须是 "hash.序号" 格式（如 02e06844.0），其他格式一律拒绝
-    if (!/^[0-9a-fA-F]{8}\.[0-9]+$/.test(file)) {
-        throw new Error(`非法的证书文件名: ${file}`);
-    }
-
-    // 并行删除所有位置的文件（个别目录不存在不影响整体流程）
-    const rmCommands = ALL_CERT_PATHS.map(p =>
-        exec(`rm -f '${p}${file}'`).catch(() => {})
-    );
-    // 带版本号的 apex 目录路径含动态版本号，不能用单引号固定路径，改用 glob 展开清理
-    // file 已经过上面的格式校验，不含 shell 特殊字符，可直接拼接
-    rmCommands.push(exec(`rm -f ${CERT_MODULE_APEX_NUM_GLOB}${file}`).catch(() => {}));
-    await Promise.allSettled(rmCommands);
-
-    // 删除后校验：用户证书目录和模块备份目录是核心存储，不应再存在该文件
-    const [userFiles, moduleFiles] = await Promise.all([
-        getFileList(CERT_USER_SYSTEM),
-        getFileList(CERT_MODULE),
-    ]);
-    if (userFiles.includes(file) || moduleFiles.includes(file)) {
-        throw new Error(`证书删除失败: ${file}`);
-    }
-}
-
-/**
- * 获取模块版本信息
- * 读取 module.prop 文件，里面记录了版本号、作者、描述等
- * 
- * @throws 读取失败时抛出异常
- */
-export async function getVersionInfo(): Promise<string[]> {
-    const { errno, stdout } = await exec(`cat '${MODULE_PROP_PATH}'`) as ExecResult;
-    if (errno !== 0) {
-        throw new Error(`读取模块信息失败: ${MODULE_PROP_PATH}`);
-    }
-    return String(stdout).trim().split('\n');
-}
-
-/**
- * 获取模块运行日志
- * 读取 install.log 文件，记录模块每次启动的执行情况
- * 文件不存在时（模块安装后、首次重启前）返回空数组，由调用方展示"暂无日志"
- * 
- * @throws 读取失败时抛出异常
- */
-export async function getLoggerInfo(): Promise<string[]> {
-    const { errno, stdout } = await exec(`cat '${INSTALL_LOG_PATH}'`) as ExecResult;
-    if (errno !== 0) {
-        return []; // 日志文件不存在属于正常情况（首次安装未重启），当作"空"处理
-    }
-    return String(stdout).trim().split('\n').filter(Boolean);
-}
-
-/**
- * 获取已安装证书的完整列表（含名称和状态）
- * 这是证书管理页面的核心数据源
- * 
- * 流程：
- *   1. 获取 Android 系统版本（决定去哪个目录查系统证书）
- *   2. 并行列出用户证书目录和系统证书目录
- *   3. 并发识别每个用户证书的名称，并判断是否已成功安装到系统目录
- * 
- * @returns 证书条目数组；没有任何证书时返回空数组（读取失败会抛异常，两者区分开）
- */
 export async function getInstallCertResults(): Promise<CertEntry[]> {
-    const { errno, stdout } = await exec('getprop ro.build.version.sdk') as ExecResult;
-    if (errno !== 0) {
-        throw new Error('获取系统版本失败');
+    const runtime = await getRuntimeInfo();
+    const [stateBoot, data] = await Promise.all([optionalFile(STATE_BOOT_PATH), optionalFile(MANIFEST_PATH)]);
+    if (stateBoot !== runtime.bootId || data === null) {
+        // Show every user's inputs while making unavailable boot verification explicit.
+        const inputList = await run("for d in /data/misc/user/*/cacerts-added; do [ ! -d \"$d\" ] || find \"$d\" -maxdepth 1 -type f; done");
+        return inputList.split('\n').filter(path => /\/cacerts-added\/[0-9a-f]{8}\.\d+$/.test(path)).map(path => ({
+            id: '', filename: path.split('/').pop()!, name: path.split('/').pop()!,
+            status: 'unknown', sources: [path], canDelete: false, enabled: false, canToggle: false, pendingChange: false,
+        }));
     }
-    const sdkVersion = Number(stdout);
-    if (isNaN(sdkVersion)) {
-        throw new Error('获取系统版本失败');
-    }
-
-    const systemCertPath = sdkVersion >= 34 ? CERT_HIGH_SYSTEM : CERT_LOW_SYSTEM;
-    const [userCerts, systemCerts, moduleCerts] = await Promise.all([
-        getFileList(CERT_USER_SYSTEM).catch(() => [] as string[]),
-        getFileList(systemCertPath).catch(() => [] as string[]),
-        getFileList(CERT_MODULE).catch(() => [] as string[]),
-    ]);
-
-    let baseSystemCerts: string[] = [];
-    try {
-        const { errno: errnoList, stdout: listOut } = await exec(`cat '${SYSTEM_CERTS_LIST_PATH}'`) as ExecResult;
-        if (errnoList === 0) {
-            baseSystemCerts = String(listOut).trim().split('\n').filter(Boolean);
+    const grouped = new Map<string, SourceRow[]>();
+    const selections = await readSelections();
+    for (const row of parseManifest(data)) grouped.set(row.fingerprint, [...grouped.get(row.fingerprint) ?? [], row]);
+    const system = runtime.sdk >= 34 ? CERT_HIGH_SYSTEM : CERT_LOW_SYSTEM;
+    return Promise.all(Array.from(grouped, async ([fingerprint, rows]): Promise<CertEntry> => {
+        const row = rows.find(item => item.state === 'pending') ?? rows[0]!;
+        const filename = row.target === '-' ? row.source.split('/').pop()! : row.target;
+        let status: CertStatus;
+        if (row.state === 'removed') status = 'removed';
+        else if (row.state === 'excluded') status = 'excluded';
+        else if (row.state === 'disabled') status = 'disabled';
+        else if (row.state === 'native') status = 'native';
+        else if (row.state === 'unverified') status = 'unverified';
+        else if (runtime.state !== 'ready') status = runtime.state === 'failed' ? 'failed' : 'unknown';
+        else {
+            const result = await exec(`test -r ${quote(CERT_MODULE + row.target)} && test -r ${quote(system + row.target)} && cmp -s ${quote(CERT_MODULE + row.target)} ${quote(system + row.target)}`) as ExecResult;
+            status = result.errno === 0 ? 'success' : 'failed';
         }
-    } catch (e) {
-    }
-
-    const userInstalledCerts = new Set<string>();
-
-    for (const c of userCerts) {
-        userInstalledCerts.add(c);
-    }
-
-    for (const c of moduleCerts) {
-        if (baseSystemCerts.length > 0 && !baseSystemCerts.includes(c)) {
-            userInstalledCerts.add(c);
-        }
-    }
-
-    const allUserCerts = Array.from(userInstalledCerts);
-
-    if (allUserCerts.length === 0 && systemCerts.length === 0) {
-        return [];
-    }
-
-    return Promise.all<CertEntry>(allUserCerts.map(async (item) => {
-        const targetPath = moduleCerts.includes(item) ? CERT_MODULE : CERT_USER_SYSTEM;
-        const name = await getCertName(targetPath + item);
-        return {
-            status: (userCerts.includes(item) && systemCerts.includes(item)) ? 'success' : 'failed',
-            name: `${item}: ${name}`,
-        };
+        const path = row.state === 'pending' || row.state === 'native' ? CERT_MODULE + row.target : row.source;
+        const name = row.state === 'removed' ? filename : `${filename}: ${await getCertName(path, fingerprint)}`;
+        const canToggle = ['pending', 'disabled', 'excluded'].includes(row.state);
+        const bootEnabled = row.state === 'pending';
+        const enabled = canToggle ? selections.get(fingerprint) ?? bootEnabled : false;
+        return { id: fingerprint, filename, status, name, sources: rows.map(item => item.source),
+            canDelete: row.state !== 'removed', enabled, canToggle, pendingChange: canToggle && enabled !== bootEnabled };
     }));
 }
-
-// ==================== 模式配置 ====================
-
-/**
- * 获取当前运行模式
- * 读取 mode.conf 文件，解析出 compatible（兼容模式）或 builtin（内置方法）
- * 文件不存在或内容无效时返回默认值 compatible（这是"默认配置"语义，不算错误）
- */
-export async function getCurrentMode(): Promise<RunMode> {
-    const { errno, stdout } = await exec(`cat '${MODE_CONF_PATH}'`) as ExecResult;
-    if (errno !== 0) {
-        return 'compatible';
+async function readSelections(): Promise<Map<string, boolean>> {
+    const data = await optionalFile(SELECTION_PATH);
+    const selections = new Map<string, boolean>();
+    for (const line of (data ?? '').split('\n').filter(Boolean)) {
+        const match = /^([0-9a-f]{64})\t([01])$/.exec(line);
+        if (!match) throw new Error('证书挂载选择配置损坏');
+        selections.set(match[1]!, match[2] === '1');
     }
-
-    const content = String(stdout).trim().toLowerCase();
-    // 从 "mode=compatible" 或 "mode=builtin" 中提取值
-    return content.includes('builtin') ? 'builtin' : 'compatible';
+    return selections;
 }
-
-/**
- * 切换运行模式
- * 把新的模式值写入 mode.conf 文件
- * 注意：修改后需要重启设备才能生效
- * 
- * @throws 写入失败时抛出异常
- */
+export async function setCertEnabled(fingerprint: string, enabled: boolean): Promise<void> {
+    if (!/^[0-9a-f]{64}$/.test(fingerprint) || typeof enabled !== 'boolean') throw new Error('非法的证书挂载选择');
+    await run(`sh ${quote(`${MODULE_DIR}/sh/set-cert-enabled.sh`)} ${quote(fingerprint)} ${enabled ? '1' : '0'}`);
+    if ((await readSelections()).get(fingerprint) !== enabled) throw new Error('证书挂载选择写入校验失败');
+}
+export async function deleteCert(fingerprint: string): Promise<void> {
+    if (!/^[0-9a-f]{64}$/.test(fingerprint)) throw new Error('非法的证书指纹');
+    await run(`sh ${quote(`${MODULE_DIR}/sh/delete-cert.sh`)} ${quote(fingerprint)}`);
+}
+export async function getVersionInfo(): Promise<string[]> {
+    return (await run(`cat ${quote(MODULE_PROP_PATH)}`)).split('\n');
+}
+export async function getLoggerInfo(): Promise<string[]> {
+    return (await optionalFile(INSTALL_LOG_PATH) ?? '').split('\n').filter(Boolean);
+}
+export async function getCurrentMode(): Promise<RunMode> {
+    const data = await optionalFile(MODE_CONF_PATH);
+    const match = /^\s*mode\s*=\s*(compatible|builtin)\s*$/m.exec(data ?? '');
+    return match?.[1] === 'builtin' ? 'builtin' : 'compatible';
+}
 export async function setMode(mode: RunMode): Promise<void> {
-    await exec(`echo "mode=${mode}" > '${MODE_CONF_PATH}'`);
+    if (mode !== 'compatible' && mode !== 'builtin') throw new Error('非法的运行模式');
+    await run(`sh ${quote(`${MODULE_DIR}/sh/set-mode.sh`)} ${quote(mode)}`);
+    if (await getCurrentMode() !== mode) throw new Error('模式配置写入校验失败');
 }

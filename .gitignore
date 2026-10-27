@@ -10,3 +10,7 @@ node_modules
 .claude
 .parcel-cache
 .actrc
+/diagnostics/
+/driver-fix/
+/dist/
+__pycache__/

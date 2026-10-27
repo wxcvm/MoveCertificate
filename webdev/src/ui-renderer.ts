@@ -7,12 +7,13 @@
  */
 
 import { t } from './i18n.js';
-import type { RunMode, CertEntry } from './constants.js';
+import type { RunMode, CertEntry, RuntimeInfo } from './constants.js';
 
 // ==================== 类型定义 ====================
 
 /** 删除按钮回调 */
 export type DeleteHandler = (fileName: string, liElement: HTMLLIElement) => void;
+export type MountHandler = (fingerprint: string, enabled: boolean) => Promise<void>;
 
 /** 模式切换回调 */
 export type SwitchModeHandler = (newMode: RunMode) => void;
@@ -55,6 +56,7 @@ export function renderCertList(
     containerId: string,
     certs: CertEntry[],
     onDelete: DeleteHandler,
+    onMount: MountHandler,
 ): void {
     const list = document.getElementById(containerId);
     if (!list) return;
@@ -74,20 +76,54 @@ export function renderCertList(
         // 左侧的状态圆点：绿色表示已迁移到系统证书目录，灰色表示未成功
         const statusDot = document.createElement('div');
         statusDot.className = `status-dot ${cert.status === 'success' ? 'green' : 'gray'}`;
+        statusDot.title = t(`status_${cert.status}`);
         li.appendChild(statusDot);
 
         // 中间的证书名称文字
+        const details = document.createElement('div');
+        details.className = 'cert-details';
         const certName = document.createElement('span');
+        certName.className = 'cert-name';
         certName.textContent = cert.name;
-        li.appendChild(certName);
+        certName.title = `${t(`status_${cert.status}`)}\n${cert.sources.join('\n')}`;
+        details.appendChild(certName);
+        const state = document.createElement('span');
+        state.className = 'cert-state';
+        state.textContent = t(`status_${cert.status}`);
+        details.appendChild(state);
+        li.appendChild(details);
+        const controls = document.createElement('div');
+        controls.className = 'cert-controls';
+
+        const mountLabel = document.createElement('label');
+        mountLabel.className = 'cert-mount-toggle' + (cert.canToggle ? '' : ' disabled');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = cert.enabled;
+        checkbox.disabled = !cert.canToggle;
+        checkbox.setAttribute('aria-label', `${t('mountCertificate')}: ${cert.name}`);
+        checkbox.onchange = () => {
+            checkbox.disabled = true;
+            onMount(cert.id, checkbox.checked).catch(error => {
+                checkbox.checked = cert.enabled;
+                console.error('Certificate selection failed', error);
+            }).finally(() => { checkbox.disabled = !cert.canToggle; });
+        };
+        mountLabel.appendChild(checkbox);
+        const mountText = document.createElement('span');
+        mountText.textContent = cert.pendingChange ? t('mountPendingReboot') : t('mountCertificate');
+        mountLabel.appendChild(mountText);
+        mountLabel.title = `${t('mountSelectionHint')}\n${t(`status_${cert.status}`)}`;
+        controls.appendChild(mountLabel);
 
         // 右侧的删除按钮
         const deleteButton = document.createElement('button');
         deleteButton.textContent = t('delete');
         deleteButton.className = 'delete-button';
-        // cert.name 格式是 "hash: 名称"，用 : 分割取第一部分就是文件名
-        deleteButton.onclick = () => onDelete(cert.name.split(':')[0]!, li);
-        li.appendChild(deleteButton);
+        deleteButton.disabled = !cert.canDelete;
+        deleteButton.onclick = () => onDelete(cert.id, li);
+        controls.appendChild(deleteButton);
+        li.appendChild(controls);
 
         list.appendChild(li);
     }
@@ -133,6 +169,7 @@ export function renderModeConfig(
     containerId: string,
     mode: RunMode,
     onSwitch: SwitchModeHandler,
+    runtime?: RuntimeInfo,
 ): void {
     const el = document.getElementById(containerId);
     if (!el) return;
@@ -156,6 +193,7 @@ export function renderModeConfig(
                 ${t('switchTo')}${mode === 'compatible' ? t('builtinMode') : t('compatibleMode')}
             </button>
             <p class="mode-hint">${t('modeHint')}</p>
+            <p id="effectiveModeInfo"></p>
         </div>
 
         <!-- 两种模式的详细说明 -->
@@ -183,8 +221,15 @@ export function renderModeConfig(
     `;
 
     // 绑定切换按钮的点击事件
-    const switchBtn = document.getElementById('switchModeBtn');
+    const effective = document.getElementById('effectiveModeInfo');
+    if (effective) {
+        const active = runtime?.effectiveMode ? modeNames[runtime.effectiveMode] : t('status_unknown');
+        effective.textContent = `${t('effectiveMode')}: ${active}; ${runtime?.state ?? 'unknown'} (${runtime?.reason ?? 'unknown'})`;
+        if (runtime && runtime.sdk >= 34) effective.textContent += `\n${t('builtinMountProvider')}`;
+    }
+    const switchBtn = document.getElementById('switchModeBtn') as HTMLButtonElement | null;
     if (switchBtn) {
+        switchBtn.disabled = !runtime;
         switchBtn.onclick = () => {
             // 计算切换后的新模式
             const newMode: RunMode = mode === 'compatible' ? 'builtin' : 'compatible';

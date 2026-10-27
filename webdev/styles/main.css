@@ -353,8 +353,11 @@ ul {
 }
 
 li {
-    display: flex;
-    align-items: center;
+    display: grid;
+    grid-template-columns: 10px minmax(0, 1fr);
+    align-items: start;
+    column-gap: 12px;
+    row-gap: 8px;
     background: var(--bg-card);
     margin-bottom: 8px;
     padding: 12px 14px;
@@ -378,7 +381,7 @@ li:last-child {
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    margin-right: 12px;
+    margin-top: 5px;
     flex-shrink: 0;
     position: relative;
 }
@@ -399,15 +402,31 @@ li:last-child {
 }
 
 /* 证书名称 */
-li span {
+.cert-name {
+    display: block;
     font-size: 13px;
     color: var(--text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    user-select: text;
 }
+.cert-state { display: block; margin-top: 4px; font-size: 12px; color: var(--text-hint); }
+.cert-controls { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cert-controls span { white-space: normal; font-size: 13px; }
 
 /* 删除按钮 */
+.cert-mount-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 0;
+    padding: 8px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+.cert-mount-toggle input { accent-color: var(--dot-green); }
+.cert-mount-toggle + .delete-button { margin-left: 4px; }
+.cert-mount-toggle.disabled { opacity: 0.5; cursor: default; }
 .delete-button {
     margin-left: auto;
     background: var(--btn-delete-bg);
