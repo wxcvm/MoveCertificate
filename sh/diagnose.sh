@@ -17,7 +17,12 @@ result=0
 # Preserve the default launcher survey, or examine the requested application
 # processes alongside init. Explicit PIDs are never silently deduplicated.
 if [ "$#" -eq 0 ]; then
-    set -- 1 $(pidof zygote zygote64 webview_zygote) $(ps -A -o PID,NAME | awk '$2 ~ /_zygote$/ {print $1}')
+    primary=$(pidof zygote zygote64 2>/dev/null)
+    if [ -z "$primary" ]; then
+        printf 'reason=primary_zygote_unavailable\n'
+        result=1
+    fi
+    set -- 1 $primary $(pidof webview_zygote 2>/dev/null) $(ps -A -o PID,NAME | awk '$2 ~ /_zygote$/ {print $1}')
     explicit=0
 else
     explicit=1
@@ -46,4 +51,11 @@ for pid in "$@"; do
 done
 # This checks the process mount view as root, not its TrustManager/SELinux
 # access. A successful result is not proof that an application accepts TLS.
+printf '\nnamespace_check_status=%s\n' "$result"
+check_certificate_sources
+source_result=$?
+printf 'source_check_status=%s\n' "$source_result"
+# 0 = consistent; 1 = namespace failure or changed inputs; 2 = incomplete check.
+[ "$source_result" -ne 2 ] || exit 2
+[ "$source_result" -eq 0 ] || result=1
 exit "$result"
