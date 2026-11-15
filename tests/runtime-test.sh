@@ -182,6 +182,56 @@ for version in 34 37; do
     done
     ok "Android SDK $version builtin layouts preserve full CA contents and active aliases; provider result must verify"
 done
+# Separate active aliases can share the same APEX parent identity but have
+# different mounted certificate directories. Inject a failure on the second
+# bind and require the first bind to be undone, without unmounting the source.
+setup
+SDK=37
+APEX_CERT_DIR="$MODDIR/apex/com.android.conscrypt/cacerts"
+SYSTEM_SOURCE="$APEX_CERT_DIR"
+mkdir -p "$SYSTEM_SOURCE" "$MODDIR/apex/com.android.conscrypt@active/cacerts"
+cp "$FIX/native.pem" "$SYSTEM_SOURCE/$HASH.0"
+cp "$FIX/native.pem" "$MODDIR/apex/com.android.conscrypt@active/cacerts/$HASH.0"
+cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+prepare_cert_store || fail 'rollback preparation'
+rollback_alias="$MODDIR/apex/com.android.conscrypt@active/cacerts"
+rollback_ops="$MODDIR/rollback-ops"
+stat() {
+    case "$*" in
+        *'%d:%i'*'/com.android.conscrypt'|*'%d:%i'*'/com.android.conscrypt@active') echo '10:10' ;;
+        *'%u'*) echo 0 ;;
+        *) command stat "$@" ;;
+    esac
+}
+mount() {
+    printf 'bind %s\n' "$4" >> "$rollback_ops"
+    [ "$4" = "$SYSTEM_SOURCE" ] || return 1
+    command cp "$3"/* "$4/"
+}
+umount() {
+    printf 'unmount %s\n' "$1" >> "$rollback_ops"
+    rm -f "$1/$HASH.1"
+}
+if mount_in_current_namespace "$MODULE_CERT_DIR"; then fail 'second alias failure accepted'; fi
+[ "$(cat "$rollback_ops")" = "$(printf 'bind %s\nbind %s\nunmount %s' "$SYSTEM_SOURCE" "$rollback_alias" "$SYSTEM_SOURCE")" ] || fail 'rollback did not unwind only successful binds'
+[ ! -f "$SYSTEM_SOURCE/$HASH.1" ] && [ -f "$MODULE_CERT_DIR/$HASH.1" ] || fail 'rollback altered source or left partial mount'
+ok 'failed second APEX bind rolls back the first new bind'
+: > "$rollback_ops"
+printf 'stale' >> "$MODULE_CERT_DIR/$HASH.1"
+# A mismatched source must be rejected before any target is touched.
+mkdir -p "$MODDIR/partial"
+command cp "$MODULE_CERT_DIR/$HASH.0" "$MODDIR/partial/"
+if mount_in_current_namespace "$MODDIR/partial"; then fail 'partial mount source accepted'; fi
+[ ! -s "$rollback_ops" ] || fail 'partial source touched live mounts'
+ok 'partial source is rejected before binding'
+# Restore the standard fixture mocks for later cases.
+stat() {
+    if [ "$1" = -c ] && [ "$2" = '%u' ]; then echo 0
+    else command stat "$@"; fi
+}
+mount() { echo "$*" >> "$TEST_ROOT/mounts"; return 1; }
+umount() { echo "$*" >> "$TEST_ROOT/unmounts"; return 0; }
+
 # Compare canonical DER at the original input path, not just the hash filename.
 setup
 cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
