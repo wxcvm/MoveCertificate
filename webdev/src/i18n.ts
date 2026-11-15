@@ -32,6 +32,13 @@ export interface LangItem {
 // 如果你要加新文字，在这里添加一个 key，然后给三种语言分别填上翻译即可
 
 const translations: Record<string, TranslationEntry> = {
+    healthTitle: { 'zh-CN': '实时证书健康诊断', en: 'Live certificate health', tr: 'Anlık sertifika durumu' },
+    healthHint: { 'zh-CN': '只读检查当前挂载和证书来源变化。可选填 APP 进程 PID（空格分隔）；空白则检查系统启动器。通过不代表 APP 一定信任 HTTPS 证书。', en: 'Read-only check of current mounts and certificate source changes. Enter app PIDs separated by spaces, or leave blank for system launchers. Passing does not prove app TLS trust.', tr: 'Geçerli bağlamaları ve sertifika kaynak değişikliklerini salt okunur denetler. Uygulama PID değerlerini boşlukla ayırın veya sistem başlatıcıları için boş bırakın. Başarı, uygulamanın TLS güvenini kanıtlamaz.' },
+    healthCheck: { 'zh-CN': '立即检查', en: 'Check now', tr: 'Şimdi denetle' },
+    healthRunning: { 'zh-CN': '正在检查…', en: 'Checking…', tr: 'Denetleniyor…' },
+    healthPassed: { 'zh-CN': '本次检查通过（不代表 APP 已接受 TLS 证书）', en: 'Checks passed (not proof of app TLS trust)', tr: 'Denetimler başarılı (TLS güveni kanıtlanmadı)' },
+    healthAttention: { 'zh-CN': '发现变化、异常或检查未完成，请查看详情', en: 'Changes, issues or incomplete checks; see details', tr: 'Değişiklik, sorun veya eksik denetim; ayrıntılara bakın' },
+    healthError: { 'zh-CN': '诊断执行失败，请检查 PID 或 Root 权限', en: 'Diagnostic failed; check PIDs or root access', tr: 'Tanılama başarısız; PID veya root erişimini denetleyin' },
     mountCertificate: { 'zh-CN': '挂载', en: 'Mount', tr: 'Bağla' },
     mountPendingReboot: { 'zh-CN': '待重启', en: 'Reboot pending', tr: 'Yeniden başlatma bekliyor' },
     mountSelectionHint: { 'zh-CN': '勾选后在下次启动挂载；取消仅跳过迁移，保留用户证书。', en: 'Apply on next boot. Unchecking keeps the user certificate and skips migration.', tr: 'Sonraki açılışta uygulanır. Kaldırmak kullanıcı sertifikasını silmez.' },
