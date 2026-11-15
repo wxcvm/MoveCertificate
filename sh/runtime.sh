@@ -202,6 +202,62 @@ prepare_cert_store() {
     return 0
 }
 
+# Compare current certificate inputs with the boot manifest. This is a
+# read-only, on-demand check; never replace the active trust store.
+check_certificate_sources() (
+    [ -r "$MANIFEST" ] || { echo 'source_check=unavailable reason=manifest_missing'; exit 2; }
+    umask 077
+    work=$(mktemp -d "$MODDIR/.diagnostic.XXXXXX") || exit 2
+    trap 'rm -rf "$work"' EXIT
+    changes=0
+    unknown=0
+    for user_dir in ${USER_CERT_DIRS:-/data/misc/user/*/cacerts-added} "$CUSTOM_CERT_DIR"; do
+        [ -d "$user_dir" ] || continue
+        origin=user
+        [ "$user_dir" != "$CUSTOM_CERT_DIR" ] || origin=custom
+        for input in "$user_dir"/*; do
+            [ -f "$input" ] && [ ! -L "$input" ] || continue
+            name=${input##*/}
+            if [ "$origin" = user ]; then
+                valid_cert_name "$name" || continue
+            else
+                printf '%s\n' "$name" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_.-]*$' || continue
+                [ "$(stat -c '%u' "$input")" = 0 ] || continue
+            fi
+            if ! cert_to_der "$input" "$work/current.der" "$origin"; then
+                printf 'source_status=unverified path=%s\n' "$input"
+                unknown=$((unknown + 1))
+                continue
+            fi
+            digest=$(file_digest "$work/current.der")
+            if [ "${#digest}" -ne 64 ]; then
+                printf 'source_status=unverified path=%s\n' "$input"
+                unknown=$((unknown + 1))
+                continue
+            fi
+            previous=$(awk -F '\t' -v p="$input" '$3 == p && $4 != "removed" {print $1; exit}' "$MANIFEST")
+            if [ -z "$previous" ]; then
+                printf 'source_status=new path=%s\n' "$input"
+                changes=$((changes + 1))
+            elif [ "$previous" != "$digest" ]; then
+                printf 'source_status=changed path=%s\n' "$input"
+                changes=$((changes + 1))
+            fi
+        done
+    done
+    tab=$(printf '\t')
+    while IFS="$tab" read -r digest target input state; do
+        [ "$state" != removed ] || continue
+        if [ ! -f "$input" ] || [ -L "$input" ]; then
+            printf 'source_status=missing path=%s\n' "$input"
+            changes=$((changes + 1))
+        fi
+    done < "$MANIFEST"
+    printf 'source_changes=%s source_unverified=%s\n' "$changes" "$unknown"
+    [ "$unknown" -eq 0 ] || exit 2
+    [ "$changes" -eq 0 ]
+)
+
 remove_stage() {
     case "$1" in "$MODDIR"/.stage.*) [ ! -L "$1" ] && rm -rf "$1" ;; *) return 1 ;; esac
 }
