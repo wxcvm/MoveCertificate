@@ -26,6 +26,7 @@ import {
     getCurrentMode,
     setMode,
     getRuntimeInfo,
+    getHealthDiagnostic,
     setCertEnabled,
 } from './cert-service.js';
 import {
@@ -456,6 +457,28 @@ window.onload = async (): Promise<void> => {
     const refreshLogBtn = document.getElementById('refreshLogBtn');
     if (refreshLogBtn) {
         refreshLogBtn.addEventListener('click', refreshLogTab);
+    }
+
+    const healthBtn = document.getElementById('healthCheckBtn') as HTMLButtonElement | null;
+    const healthPids = document.getElementById('healthPids') as HTMLInputElement | null;
+    const healthStatus = document.getElementById('healthStatus');
+    const healthOutput = document.getElementById('healthOutput');
+    if (healthBtn && healthPids && healthStatus && healthOutput) {
+        healthBtn.addEventListener('click', async () => {
+            healthBtn.disabled = true;
+            healthStatus.textContent = t('healthRunning');
+            healthOutput.textContent = '';
+            try {
+                const result = await getHealthDiagnostic(healthPids.value);
+                healthStatus.textContent = t(result.status === 0 ? 'healthPassed' : 'healthAttention');
+                healthOutput.textContent = result.output;
+            } catch (error) {
+                healthStatus.textContent = t('healthError');
+                healthOutput.textContent = String(error);
+            } finally {
+                healthBtn.disabled = false;
+            }
+        });
     }
 
     // ==================== 默认加载证书管理页 ====================
