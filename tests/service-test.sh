@@ -61,8 +61,7 @@ run_mount() { sh "$WORK/module/sh/mount.sh"; }
 for reason in initial_mount_failed post_mount_failed; do
     setup failed "$reason" compatible
     run_post_mount || fail "post-mount did not retry $reason"
-    [ -f "$WORK/module/activated" ] && grep -q '^state=prepared
- "$WORK/module/runtime.conf" || fail 'post-mount did not recover to prepared'
+    [ -f "$WORK/module/activated" ] && grep -q '^state=prepared$' "$WORK/module/runtime.conf" || fail 'post-mount did not recover to prepared'
     [ ! -f "$WORK/module/verified" ] || fail 'post-mount claimed final verification'
     ok "post-mount retries $reason without claiming ready"
 done
@@ -78,8 +77,7 @@ ok 'post-mount rejects a previous boot store'
 setup prepared none
 touch "$WORK/module/reject"
 if run_post_mount; then fail 'post-mount accepted failed activation'; fi
-grep -q '^reason=post_mount_failed
- "$WORK/module/runtime.conf" || fail 'post-mount failure not recorded'
+grep -q '^reason=post_mount_failed$' "$WORK/module/runtime.conf" || fail 'post-mount failure not recorded'
 ok 'post-mount activation failure remains a failure'
 setup failed initial_mount_failed compatible
 run_mount || fail 'init recovery did not prepare source'
