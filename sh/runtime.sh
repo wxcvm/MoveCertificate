@@ -271,20 +271,20 @@ mount_in_current_namespace() {
     targets="$SYSTEM_SOURCE"
     if [ "$SDK" -ge 34 ]; then
         apex_parent=${APEX_CERT_DIR%/com.android.conscrypt/cacerts}
-        apex_identity=$(stat -c '%d:%i' "$apex_parent/com.android.conscrypt") || return 1
+        apex_identity=$(stat -L -c '%d:%i' "$apex_parent/com.android.conscrypt") || return 1
         for directory in "$apex_parent"/com.android.conscrypt@*; do
             [ -d "$directory/cacerts" ] || continue
-            if [ "$(stat -c '%d:%i' "$directory")" = "$apex_identity" ]; then
+            if [ "$(stat -L -c '%d:%i' "$directory")" = "$apex_identity" ]; then
                 targets="$targets $directory/cacerts"
             fi
         done
     fi
     if [ "$CURRENT_MODE" = builtin ]; then verify_cert_mount "$SYSTEM_SOURCE" builtin; return $?; fi
     [ -d "$source" ] && [ -d "$SYSTEM_SOURCE" ] || return 1
-    source_id=$(stat -c '%d:%i' "$source") || return 1
+    source_id=$(stat -L -c '%d:%i' "$source") || return 1
     for target in $targets; do
         [ -d "$target" ] || return 1
-        target_id=$(stat -c '%d:%i' "$target") || return 1
+        target_id=$(stat -L -c '%d:%i' "$target") || return 1
         if [ "$source_id" != "$target_id" ]; then
             mount -o bind "$source" "$target" || return 1
             verify_cert_mount "$target" compatible || { umount "$target"; return 1; }
@@ -304,10 +304,10 @@ prepare_builtin() {
         # Keep root/apex as well for providers that explicitly support it.
         destinations="$MODDIR/apex/com.android.conscrypt/cacerts $MODDIR/system/apex/com.android.conscrypt/cacerts"
         apex_parent=${APEX_CERT_DIR%/com.android.conscrypt/cacerts}
-        apex_identity=$(stat -c '%d:%i' "$apex_parent/com.android.conscrypt") || return 1
+        apex_identity=$(stat -L -c '%d:%i' "$apex_parent/com.android.conscrypt") || return 1
         for directory in "$apex_parent"/com.android.conscrypt@*; do
             [ -d "$directory/cacerts" ] || continue
-            [ "$(stat -c '%d:%i' "$directory")" != "$apex_identity" ] || destinations="$destinations $MODDIR/apex/${directory##*/}/cacerts $MODDIR/system/apex/${directory##*/}/cacerts"
+            [ "$(stat -L -c '%d:%i' "$directory")" != "$apex_identity" ] || destinations="$destinations $MODDIR/apex/${directory##*/}/cacerts $MODDIR/system/apex/${directory##*/}/cacerts"
         done
     fi
     for destination in $destinations; do
