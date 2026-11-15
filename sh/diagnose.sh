@@ -12,6 +12,9 @@ namespace_script=$(cat "$MODDIR/sh/namespace.sh") || exit 1
 expected_namespace_store=$(namespace_store_manifest) || exit 1
 printf 'MoveCertificate namespace diagnostic\nboot_id=%s sdk=%s mode=%s\n' "$BOOT_ID" "$SDK" "$CURRENT_MODE"
 printf 'boot_state=%s uptime=%s\n' "$(sed -n 's/^state=//p' "$RUNTIME")" "$(cut -d' ' -f1 /proc/uptime)"
+# Report both candidate directories; a Java per-process property can still
+# select the legacy store, which a root shell cannot conclusively infer.
+report_system_store_paths
 seen=' '
 result=0
 # Preserve the default launcher survey, or examine the requested application
