@@ -182,4 +182,29 @@ for version in 34 37; do
     done
     ok "Android SDK $version builtin layouts preserve full CA contents and active aliases; provider result must verify"
 done
+# Compare canonical DER at the original input path, not just the hash filename.
+setup
+cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+prepare_cert_store || fail 'diagnostic baseline'
+output=$(check_certificate_sources) || fail 'unchanged sources flagged'
+printf '%s\n' "$output" | grep -q '^source_changes=0 source_unverified=0$' || fail 'unchanged summary'
+base64 -d "$FIX/collision.b64" > "$MODDIR/user0/$HASH.0"
+check_certificate_sources >/dev/null || fail 'equivalent DER source flagged'
+ok 'source diagnostics recognize equivalent PEM and DER'
+cp "$FIX/native.pem" "$MODDIR/user0/$HASH.0"
+output=$(check_certificate_sources)
+[ "$?" -eq 1 ] && printf '%s\n' "$output" | grep -q 'source_status=changed' || fail 'replacement not detected'
+ok 'source diagnostics detect changed certificate at same path'
+cp "$FIX/collision.pem" "$MODDIR/user10/$HASH.2"
+output=$(check_certificate_sources)
+[ "$?" -eq 1 ] && printf '%s\n' "$output" | grep -q 'source_status=new' || fail 'new source not detected'
+rm "$MODDIR/user0/$HASH.0"
+output=$(check_certificate_sources)
+[ "$?" -eq 1 ] && printf '%s\n' "$output" | grep -q 'source_status=missing' || fail 'missing source not detected'
+[ -f "$MODULE_CERT_DIR/$HASH.1" ] || fail 'read-only diagnostic modified prepared store'
+ok 'source diagnostics identify new and missing inputs without modifying prepared store'
+printf 'not a certificate\n' > "$MODDIR/user10/$HASH.2"
+output=$(check_certificate_sources)
+[ "$?" -eq 2 ] && printf '%s\n' "$output" | grep -q 'source_status=unverified' || fail 'invalid source not detected'
+ok 'source diagnostics distinguish unreadable certificate from verified change'
 printf 'PASS: %s shell regression cases\n' "$pass"
