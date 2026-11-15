@@ -310,6 +310,26 @@ ns_run() {
     return 1
 }
 
+# Filesystem evidence, not a claim about a particular app's Java TrustManager.
+report_system_store_paths() {
+    local path file name count
+    printf 'selected_system_store=%s\n' "$SYSTEM_SOURCE"
+    for path in "$SYSTEM_CERT_DIR" "$APEX_CERT_DIR"; do
+        count=0
+        if [ -d "$path" ]; then
+            for file in "$path"/*; do
+                [ -f "$file" ] || continue
+                name=${file##*/}
+                valid_cert_name "$name" || continue
+                count=$((count + 1))
+            done
+            printf 'store_candidate=%s certificate_count=%s\n' "$path" "$count"
+        else
+            printf 'store_candidate=%s unavailable=1\n' "$path"
+        fi
+    done
+}
+
 prepare_mount_source() {
     local file source_id mounted_id
     mkdir -p "$TEMP_DIR" || return 1
@@ -322,10 +342,18 @@ prepare_mount_source() {
     }
 }
 
+# Unwind only binds created by this invocation, in reverse order.
+rollback_mount_targets() {
+    local target
+    for target in "$@"; do
+        umount "$target" || print_log "ERROR: mount rollback failed target=$target"
+    done
+}
+
 mount_in_current_namespace() {
-    local source="$1" target source_id target_id targets directory apex_identity apex_parent
+    local source="$1" target source_id target_id targets directory apex_identity apex_parent mounted=''
     targets="$SYSTEM_SOURCE"
-    if [ "$SDK" -ge 34 ]; then
+    if [ "$SDK" -ge 34 ] && [ "$SYSTEM_SOURCE" = "$APEX_CERT_DIR" ]; then
         apex_parent=${APEX_CERT_DIR%/com.android.conscrypt/cacerts}
         apex_identity=$(stat -L -c '%d:%i' "$apex_parent/com.android.conscrypt") || return 1
         for directory in "$apex_parent"/com.android.conscrypt@*; do
@@ -335,18 +363,21 @@ mount_in_current_namespace() {
             fi
         done
     fi
-    if [ "$CURRENT_MODE" = builtin ]; then verify_cert_mount "$SYSTEM_SOURCE" builtin; return $?; fi
-    [ -d "$source" ] && [ -d "$SYSTEM_SOURCE" ] || return 1
+    if [ "$CURRENT_MODE" = builtin ]; then
+        for target in $targets; do verify_cert_mount "$target" builtin || return 1; done
+        return 0
+    fi
+    # Reject a stale/incomplete source before touching any live target.
+    verify_cert_mount "$source" compatible || return 1
     source_id=$(stat -L -c '%d:%i' "$source") || return 1
     for target in $targets; do
-        [ -d "$target" ] || return 1
-        target_id=$(stat -L -c '%d:%i' "$target") || return 1
+        [ -d "$target" ] || { rollback_mount_targets $mounted; return 1; }
+        target_id=$(stat -L -c '%d:%i' "$target") || { rollback_mount_targets $mounted; return 1; }
         if [ "$source_id" != "$target_id" ]; then
-            mount -o bind "$source" "$target" || return 1
-            verify_cert_mount "$target" compatible || { umount "$target"; return 1; }
-        else
-            verify_cert_mount "$target" compatible || return 1
+            mount -o bind "$source" "$target" || { rollback_mount_targets $mounted; return 1; }
+            mounted="$target $mounted"
         fi
+        verify_cert_mount "$target" compatible || { rollback_mount_targets $mounted; return 1; }
     done
     return 0
 }
