@@ -9,7 +9,6 @@ getenforce() { echo Disabled; }
 chown() { return 0; }
 stat() {
     if [ "$1" = -c ] && [ "$2" = '%u' ]; then echo 0
-    elif [ "$1" = -c ] && [ "$2" = '%d:%i' ]; then command stat -L "$@"
     else command stat "$@"; fi
 }
 mount() { echo "$*" >> "$TEST_ROOT/mounts"; return 1; }
