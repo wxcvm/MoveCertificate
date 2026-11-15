@@ -177,3 +177,12 @@ export async function setMode(mode: RunMode): Promise<void> {
     await run(`sh ${quote(`${MODULE_DIR}/sh/set-mode.sh`)} ${quote(mode)}`);
     if (await getCurrentMode() !== mode) throw new Error('模式配置写入校验失败');
 }
+
+/** On-demand diagnostic; nonzero exit codes still contain useful evidence. */
+export async function getHealthDiagnostic(pids: string): Promise<{ status: number; output: string }> {
+    const ids = pids.trim().split(/\s+/).filter(Boolean);
+    if (ids.some(id => !/^[1-9]\d*$/.test(id))) throw new Error('Invalid PID');
+    const result = await exec('sh ' + quote(MODULE_DIR + '/sh/diagnose.sh') + (ids.length ? ' ' + ids.join(' ') : '')) as ExecResult;
+    const output = [String(result.stdout).trim(), String(result.stderr).trim()].filter(Boolean).join('\n');
+    return { status: result.errno, output };
+}
