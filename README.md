@@ -17,7 +17,7 @@ WebUI 可逐张选择用户证书是否迁移，取消挂载保留原证书、�
 启用后需要**完整重启**：
 
 ```sh
-su -c "printf 'legacy_compat=1\\n' > /data/adb/modules/MoveCertificate/legacy-ca.conf"
+su -c "printf 'legacy_compat=1\n' > /data/adb/modules/MoveCertificate/legacy-ca.conf"
 ```
 
 关闭并完整重启：

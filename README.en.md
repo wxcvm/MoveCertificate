@@ -12,7 +12,7 @@ Some third-party native TLS stacks may still scan `/system/etc/security/cacerts`
 Enable and perform a **full reboot**:
 
 ```sh
-su -c "printf 'legacy_compat=1\\n' > /data/adb/modules/MoveCertificate/legacy-ca.conf"
+su -c "printf 'legacy_compat=1\n' > /data/adb/modules/MoveCertificate/legacy-ca.conf"
 ```
 
 Disable and reboot again:
