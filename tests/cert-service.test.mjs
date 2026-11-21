@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { stripTypeScriptTypes } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { executableTypeScript } from './vm-typescript.mjs';
 import vm from 'node:vm';
 import { webcrypto } from 'node:crypto';
 const source = readFileSync(new URL('../webdev/src/cert-service.ts', import.meta.url), 'utf8');
@@ -35,9 +36,12 @@ function service(options = {}) {
             return result;
         }, fetch: async (...args) => { networkCalls.push(args); throw new Error('certificate lookup must be offline'); },
     });
-    const code = stripTypeScriptTypes(constants.replaceAll('export ', '') + '\n' + source
-        .replace(/^import .*?;\s*/gms, '').replaceAll('export ', ''));
-    vm.runInContext(code + '\nthis.api={getInstallCertResults,getRuntimeInfo,getCurrentMode,setMode,deleteCert,readFileBase64,getVersionInfo,setCertEnabled,getHealthDiagnostic,getCertName};', context);
+    vm.runInContext(executableTypeScript(constants), context, {
+        filename: fileURLToPath(new URL('../webdev/src/constants.ts', import.meta.url)),
+    });
+    vm.runInContext(executableTypeScript(source) + '\nthis.api={getInstallCertResults,getRuntimeInfo,getCurrentMode,setMode,deleteCert,readFileBase64,getVersionInfo,setCertEnabled,getHealthDiagnostic,getCertName};', context, {
+        filename: fileURLToPath(new URL('../webdev/src/cert-service.ts', import.meta.url)),
+    });
     return { api: context.api, calls, networkCalls };
 }
 test('all user sources deduplicate by fingerprint, not subject filename', async () => {
