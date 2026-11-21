@@ -44,8 +44,8 @@ print_log() { printf '[MoveCertificate] %s\n' "$*" >> "$LOG_PATH"; }
 write_runtime() {
     local state="$1" reason="${2:-none}"
     {
-        printf 'boot_id=%s\nconfigured_mode=%s\neffective_mode=%s\nmode_reason=%s\nstate=%s\nreason=%s\n' \
-            "$BOOT_ID" "$CONFIGURED_MODE" "$CURRENT_MODE" "$MODE_REASON" "$state" "$reason"
+        printf 'boot_id=%s\nconfigured_mode=%s\neffective_mode=%s\nmode_reason=%s\nsystem_source=%s\nstate=%s\nreason=%s\n' \
+            "$BOOT_ID" "$CONFIGURED_MODE" "$CURRENT_MODE" "$MODE_REASON" "$SYSTEM_SOURCE" "$state" "$reason"
     } > "$RUNTIME.tmp" && chmod 600 "$RUNTIME.tmp" && mv -f "$RUNTIME.tmp" "$RUNTIME"
 }
 
@@ -523,7 +523,21 @@ process_name() {
 }
 
 load_runtime_mode() {
+    local prepared_source
     [ -f "$RUNTIME" ] && [ "$(sed -n 's/^boot_id=//p' "$RUNTIME")" = "$BOOT_ID" ] || return 1
+    # Conscrypt's APEX availability can vary as namespaces and boot mounts
+    # become ready. Never validate a store different from the one prepared.
+    prepared_source=$(sed -n 's/^system_source=//p' "$RUNTIME" | head -n1)
+    case "$prepared_source" in
+        "$SYSTEM_CERT_DIR"|"$APEX_CERT_DIR") ;;
+        *) printf 'reason=prepared_system_source_invalid\n' >&2; return 1 ;;
+    esac
+    if [ "$prepared_source" != "$SYSTEM_SOURCE" ]; then
+        printf 'reason=system_source_changed prepared=%s observed=%s\n' \
+            "$prepared_source" "$SYSTEM_SOURCE" >&2
+        return 1
+    fi
+    SYSTEM_SOURCE="$prepared_source"
     CURRENT_MODE=$(sed -n 's/^effective_mode=//p' "$RUNTIME")
     CONFIGURED_MODE=$(sed -n 's/^configured_mode=//p' "$RUNTIME")
     MODE_REASON=$(sed -n 's/^mode_reason=//p' "$RUNTIME")
