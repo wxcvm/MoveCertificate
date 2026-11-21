@@ -116,9 +116,39 @@ jobs:
           with open(sys.argv[1], encoding='utf-8') as handle:
               data = json.load(handle)
           for metric in data.get('component', {}).get('measures', []):
-              print('Coverage metric:', metric.get('metric'), 'value:',
-                    metric.get('value', 'n/a'))
+              current = metric.get('value', 'n/a')
+              period = metric.get('period', {}).get('value', 'n/a')
+              print('Coverage metric:', metric.get('metric'), 'value:', current,
+                    'new-code period:', period)
           PY
           else
             echo 'SonarCloud coverage metrics API unavailable'
+          fi
+          # Per-file new-code coverage is needed to choose meaningful tests.
+          files=$(mktemp)
+          trap 'rm -f "$response" "$metrics" "$files"' EXIT
+          set -- --fail --silent --show-error --get \
+            --header "Authorization: Bearer $SONAR_TOKEN" \
+            --data-urlencode 'component=wxcvm_MoveCertificate' \
+            --data-urlencode 'metricKeys=new_coverage,new_line_coverage,new_branch_coverage,new_lines_to_cover,new_uncovered_lines,new_conditions_to_cover,new_uncovered_conditions' \
+            --data-urlencode 'qualifiers=FIL' \
+            --data-urlencode 'ps=500'
+          if [ -n "${PR_NUMBER:-}" ]; then set -- "$@" --data-urlencode "pullRequest=$PR_NUMBER"; fi
+          if curl "$@" 'https://sonarcloud.io/api/measures/component_tree' > "$files"; then
+            python3 - "$files" <<'PY'
+          import json
+          import sys
+          with open(sys.argv[1], encoding='utf-8') as handle:
+              data = json.load(handle)
+          for component in data.get('components', []):
+              measures = []
+              for metric in component.get('measures', []):
+                  value = metric.get('period', {}).get('value', metric.get('value', 'n/a'))
+                  measures.append(f"{metric.get('metric')}={value}")
+              if measures:
+                  print('Coverage file:', component.get('path', component.get('key')),
+                        ' '.join(measures))
+          PY
+          else
+            echo 'SonarCloud per-file coverage API unavailable'
           fi
