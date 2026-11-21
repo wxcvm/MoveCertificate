@@ -9,7 +9,7 @@ import { executableTypeScript } from '../tests/vm-typescript.mjs';
 
 const [profileDirectory = 'coverage/v8', destination = 'coverage/lcov.info'] = process.argv.slice(2);
 const root = process.cwd();
-const names = ['webdev/src/cert-service.ts', 'webdev/src/constants.ts', 'webdev/src/i18n.ts'];
+const names = ['webdev/src/cert-service.ts', 'webdev/src/constants.ts', 'webdev/src/i18n.ts', 'webdev/src/main.ts'];
 const entries = new Map(names.map(name => {
     const source = readFileSync(resolve(root, name), 'utf8');
     const code = executableTypeScript(source);
