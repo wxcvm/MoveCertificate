@@ -257,4 +257,39 @@ printf 'not a certificate\n' > "$MODDIR/user10/$HASH.2"
 output=$(check_certificate_sources)
 [ "$?" -eq 2 ] && printf '%s\n' "$output" | grep -q 'source_status=unverified' || fail 'invalid source not detected'
 ok 'source diagnostics distinguish unreadable certificate from verified change'
+
+# Follow the actual AOSP Conscrypt source selection: APEX only when
+# available and nonempty on Android 14+; preserve the official fallback.
+setup
+SDK=37
+SYSTEM_CERT_DIR="$SYSTEM_SOURCE"
+APEX_CERT_DIR="$MODDIR/apex-test/cacerts"
+mkdir -p "$APEX_CERT_DIR"
+select_system_source
+[ "$SYSTEM_SOURCE" = "$SYSTEM_CERT_DIR" ] || fail 'empty APEX selected instead of system fallback'
+ok 'Android 14+ empty APEX directory selects the system fallback'
+cp "$FIX/native.pem" "$APEX_CERT_DIR/$HASH.0"
+select_system_source
+[ "$SYSTEM_SOURCE" = "$APEX_CERT_DIR" ] || fail 'populated Android 14+ APEX not preferred'
+ok 'Android 14+ populated APEX directory is the preferred trust store'
+SDK=33
+select_system_source
+[ "$SYSTEM_SOURCE" = "$SYSTEM_CERT_DIR" ] || fail 'pre-Android 14 selected APEX'
+ok 'pre-Android 14 uses the traditional system trust store'
+
+# When Android's APEX source is absent, builtin mode must not try to
+# prepare nonexistent APEX overlay aliases.
+setup
+SDK=37
+CURRENT_MODE=builtin
+SYSTEM_CERT_DIR="$SYSTEM_SOURCE"
+APEX_CERT_DIR="$MODDIR/missing-apex/cacerts"
+select_system_source
+prepare_cert_store && prepare_builtin || fail 'system fallback builtin preparation'
+verify_cert_mount "$MODDIR/system/etc/security/cacerts" builtin ||
+    fail 'system fallback builtin overlay missing'
+[ ! -d "$MODDIR/system/apex/com.android.conscrypt/cacerts" ] ||
+    fail 'APEX overlay generated while official source was unavailable'
+ok 'builtin system fallback does not generate stale APEX overlay'
+
 printf 'PASS: %s shell regression cases\n' "$pass"
