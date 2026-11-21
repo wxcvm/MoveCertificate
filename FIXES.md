@@ -1,3 +1,27 @@
+## 2026-11-22：Android 17 真实应用进程证据与 A/B 验收基线
+
+在 PGKM10 / Android 17 / API 37 的**现有安装版本**中（模块版本字段仍为 v1.6.8，不能据此唯一确定安装源码 SHA），`compatible` 模式报告 `state=ready`。实际用 `ns_run` 进入 YouTube (`com.google.android.youtube`)、哔哩哔哩 (`tv.danmaku.bili`) 和 AdGuard (`com.adguard.android`) 各自的挂载命名空间后，三者一致：`/apex/com.android.conscrypt/cacerts/0f4ed297.0` **存在**，`/system/etc/security/cacerts/0f4ed297.0` **不存在**。
+
+`openssl x509 -fingerprint -sha256` 在 APEX 中确认：
+- `0f4ed297.0` = **AdGuard Personal CA**，指纹 `37:96:AC:CE:49:47:0C:EA:B5:2F:35:C5:38:4E:BE:E3:1F:35:F0:92:C9:C2:15:9C:39:CB:AE:5A:2A:C3:C0:7E`；
+- `0a405a57.0` = **AdAway Root CA**，指纹 `D1:A2:B1:44:8F:A0:3B:0D:1F:5E:BE:F1:80:EC:9B:0A:AA:82:B5:37:DD:A2:E1:9F:1C:E7:2D:72:02:0E:1A:62`。
+
+APEX 共有 147 张 CA，legacy 145 张；`APEX_ONLY=2 LEGACY_ONLY=0 DIFFERENT=0`。目标应用挂载清单验证全通过，`source_check_status=0`。但 AdGuard 活动记录仍显示多个应用的 HTTPS 隧道失败，理由为“应用拒绝 AdGuard 证书”，包括 YouTube 的 `rr2---sn-o097znsz.googlevideo.com`、系统桌面的 `adx.ads.heytapmobi.com`、小布识屏的 `iwisdom.apps.coloros.com`、截图组件的 `traffic-operation-cn.allawntech.com`。显示的 `198.18.0.87` 和 `127.0.0.2` 可能是 fake-IP/代理或本地地址，**不能当作原始远端 TLS 节点来解释**。
+
+**已证实：**真实目标应用命名空间的旧路径缺失 AdGuard CA，并且存在实际 HTTPS 过滤拒绝。**尚未证实：**拒绝一定由读取旧路径造成（证书固定、自定义信任库、证书透明度或路由问题仍可能）；更未证实 PR #4 已在该设备安装或修复了请求。
+
+PR #4 的测试头 `fb377d72eb5482d6b8d63f16a41186d307323e67` 经 [Build and Package CI](https://github.com/wxcvm/MoveCertificate/actions/runs/44923064784) 验证通过：46 shell、21 namespace、14 service 回归，新增两项以**合成证书**模拟“APEX 比旧目录多两张 CA”，验证默认关闭时不影响旧目录、显式启用时保留原生 CA 并完成镜像。模拟测试不能代替真实 Android 17 重启验收。
+
+### 推荐实机 A/B 协议（需要用户明确测试实验构建）
+
+1. 保留**当前工作模块及配置备份**、AdGuard 当前个人 CA 的指纹和一条可复现的失败记录（相同应用、域名、网络路线、HTTPS 过滤设置）。记录模块安装来源/源码 SHA。
+2. 只使用经过 CI 校验的 PR #4 **实验构建**，保持 `compatible`；先在 `legacy_compat=0` 下完整重启，核对两条证书路径及 App PID 挂载视图，确保未意外扩大信任。
+3. 只有明确同意额外信任 AdGuard CA 后，写 `legacy_compat=1` 并**完整重启**。检查 `runtime.conf` 的 `legacy_compat=1`、`state=ready`；同时在 init、YouTube、Bilibili、AdGuard 命名空间逐一确认两个路径上的 `0f4ed297.0` **字节/指纹一致**，不能只检查文件名。
+4. 在**相同应用/域名/网络路线**重新触发失败 HTTPS 请求，记录 AdGuard 活动日志与应用功能是否变化；排除因广告阻止、专用 DNS、证书固定及 fake-IP 导致的独立失败。即使单个域名成功也不能推断其他应用都成功。
+5. 删除开关配置后**完整重启**，确认 legacy 恢复原始 145 张、APEX 继续包含目标 CA、原本的 app 视图和原生 CA 未损坏。任一挂载/证书清单校验不一致应停止试验并回退原构建。
+
+**禁止**将开启开关等同于取消证书校验、破解 certificate pinning 或保证所有 HTTPS 拦截成功。本 PR 暂保留 Draft，等待 2–5 的真机证据。
+
 ## 候选修复：Android 14+ 原生 TLS 旧目录兼容（默认关闭，尚待实机验收）
 
 2026-11-21：此前对哔哩哔哩 9.4.2 的 classes8.dex / libignet.so 静态追踪记录显示，IgNet 有独立 X.509 路径，并存在读取传统系统 CA 目录的候选路径；OpenSSL 对照记录中，APEX CA 与用户中间证书可被显式信任，而旧目录路径表现不同。该证据支持“旧目录兼容性”作为候选原因，但不等于已捕获到 Bilibili 的失败请求，也不证明所有 IgNet 请求都走该路径。
