@@ -1,3 +1,14 @@
+## 2026-11-21：遵循最新 AOSP Conscrypt 系统 CA 目录选择
+
+根据 AOSP 的 TrustedCertificateStore/SystemCertificateSource 实现，Android 14+ 在 APEX 根证书目录可用且非空时优先选择 `/apex/com.android.conscrypt/cacerts`，否则回退到 `/system/etc/security/cacerts`。后续修复仅沿用此官方信任库结构，不默认镜像两套目录，也不尝试替换应用内部的原生 TLS 验证器。部分进程可通过 Java `system.certs.enabled` 属性选择传统目录；模块无法仅凭全局 Shell 环境推断某个进程的这一属性或其原生 TLS 路径。
+
+模块初始化时选择活动来源，仍逐字节保留该来源的原生证书；仅对经过验证且被用户启用的额外 CA 进行合并，并使用已有挂载命名空间验证与回滚机制。与 Android AOSP 的目录选择保持一致，并不意味着对所有自建 SSL_CTX 或固定证书的应用都保证兼容。原双目录镜像候选 PR #3 已关闭且未合并。
+
+源码：
+- https://android.googlesource.com/platform/external/conscrypt/+/master/platform/src/main/java/org/conscrypt/TrustedCertificateStore.java
+- https://android.googlesource.com/platform/frameworks/base/+/master/core/java/android/security/net/config/SystemCertificateSource.java
+- https://source.android.com/docs/core/ota/modular-system/conscrypt
+
 # v1.6.8 修复与验证
 
 正式版新增：两种模式都先校验当前证书库，已正确挂载时不调用挂载脚本。内容确实
