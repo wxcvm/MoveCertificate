@@ -1,3 +1,11 @@
+## 候选修复：Android 14+ 原生 TLS 旧目录兼容（尚待实机验收）
+
+2026-11-21：哔哩哔哩 9.4.2 的 classes8.dex 显示 IgNet HTTP 配置中，ighttp_check_certs_enable 以 DeviceDecision 默认 true 为输入，并受 disable_ssl_verify 控制；ighttp_user_certs_enable 由上游任务的 releaseCapture 控制。libignet.so 内有独立 X.509 库及旧系统 CA 目录扫描路径。同一设备的 OpenSSL 对照实验中，显式信任 APEX AdGuard CA 或用户 Intermediate CA 均成功，而传统 CA 目录失败。因此旧路径兼容性是强候选原因，**不是已捕获到出错请求的证明**。
+
+新增默认关闭的 legacy_compat=1：检查旧系统目录原始证书名称及每个文件字节均被保留，验证失败前置拒绝；在兼容模式绑定主 APEX 与旧系统目录，在内置模式向挂载提供者提交两个目标；校验和修复覆盖 init、Zygote、应用命名空间，失败撤销本轮新增绑定。启动时快照配置，不依赖运行中动态切换；不修改 APK，不关闭证书验证或 SELinux。
+
+完成条件：CI 回归通过；在设备上开启后完整重启，检查两个目录在 init 和应用中的内容；复现同一 AdGuard HTTPS 过滤请求并确认 UNKNOWN_CA 是否消失；关闭开关并再次重启验证恢复。**在实机通过前不得将此改动宣称为已修复或正式发布。**
+
 # v1.6.8 修复与验证
 
 正式版新增：两种模式都先校验当前证书库，已正确挂载时不调用挂载脚本。内容确实
