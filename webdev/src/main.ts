@@ -199,6 +199,10 @@ async function loadCertList(force = false): Promise<void> {
         return; // 已有数据，切换 Tab 时直接展示，不重复请求
     }
 
+    // Preserve the last successfully rendered elements (including their
+    // handlers), so a failed refresh never replaces useful data with blank UI.
+    const list = document.getElementById('certificateList');
+    const previousNodes = Array.from(list?.childNodes ?? []);
     showSkeleton('certificateList', 4);
     try {
         const certs = await getInstallCertResults();
@@ -214,7 +218,7 @@ async function loadCertList(force = false): Promise<void> {
         // 失败时重置标记：删除后刷新失败会导致列表与实际状态不一致，切换 Tab 时自动重试
         certsLoaded = false;
         hideSkeleton('certificateList');
-        // 保留页面已有内容，不破坏已显示的数据
+        if (list) list.append(...previousNodes);
         toast(t('getCertListFailed'));
     }
 }
