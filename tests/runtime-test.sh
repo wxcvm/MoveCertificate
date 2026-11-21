@@ -292,4 +292,54 @@ verify_cert_mount "$MODDIR/system/etc/security/cacerts" builtin ||
     fail 'APEX overlay generated while official source was unavailable'
 ok 'builtin system fallback does not generate stale APEX overlay'
 
+
+# The official Conscrypt source can appear or disappear across early boot
+# phases. Only the source used to prepare this boot may be verified later.
+setup
+SDK=37
+SYSTEM_CERT_DIR="$SYSTEM_SOURCE"
+APEX_CERT_DIR="$MODDIR/apex-source/cacerts"
+RUNTIME="$MODDIR/runtime.conf"
+CONFIGURED_MODE=compatible
+MODE_REASON=none
+mkdir -p "$APEX_CERT_DIR"
+select_system_source
+[ "$SYSTEM_SOURCE" = "$SYSTEM_CERT_DIR" ] || fail 'empty APEX should fall back'
+write_runtime prepared || fail 'system-source fallback snapshot'
+cp "$FIX/native.pem" "$APEX_CERT_DIR/$HASH.0"
+select_system_source
+if load_runtime_mode > "$MODDIR/drift.out" 2>&1; then
+    fail 'system-source drift from fallback to APEX accepted'
+fi
+grep -q 'reason=system_source_changed' "$MODDIR/drift.out" ||
+    fail 'source drift did not report a concrete reason'
+ok 'source changing from legacy to APEX fails closed, not falsely ready'
+rm "$APEX_CERT_DIR/$HASH.0"
+select_system_source
+load_runtime_mode || fail 'same boot legacy source snapshot rejected'
+ok 'stable fallback source matches its boot snapshot'
+
+# Test drift in the opposite direction (APEX temporarily disappears).
+cp "$FIX/native.pem" "$APEX_CERT_DIR/$HASH.0"
+select_system_source
+write_runtime prepared || fail 'APEX source snapshot'
+rm "$APEX_CERT_DIR/$HASH.0"
+select_system_source
+if load_runtime_mode > "$MODDIR/drift.out" 2>&1; then
+    fail 'system-source drift from APEX to fallback accepted'
+fi
+grep -q 'reason=system_source_changed' "$MODDIR/drift.out" ||
+    fail 'APEX disappearance lacked a concrete error'
+ok 'APEX disappearing during boot fails closed'
+printf 'system_source=/unexpected/untrusted/path\n' > "$MODDIR/invalid-source"
+sed '/^system_source=/d' "$RUNTIME" > "$MODDIR/runtime.copy"
+cat "$MODDIR/invalid-source" >> "$MODDIR/runtime.copy"
+mv "$MODDIR/runtime.copy" "$RUNTIME"
+if load_runtime_mode > "$MODDIR/drift.out" 2>&1; then
+    fail 'unexpected CA source accepted from runtime snapshot'
+fi
+grep -q 'reason=prepared_system_source_invalid' "$MODDIR/drift.out" ||
+    fail 'unsafe source had no diagnostic reason'
+ok 'runtime snapshot refuses an unexpected source path'
+
 printf 'PASS: %s shell regression cases\n' "$pass"
