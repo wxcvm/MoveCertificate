@@ -15,8 +15,11 @@ init_paths() {
     SYSTEM_CERT_DIR=/system/etc/security/cacerts
     APEX_CERT_DIR=/apex/com.android.conscrypt/cacerts
     TEMP_DIR=/mnt/movecertificate
-    SYSTEM_SOURCE="$SYSTEM_CERT_DIR"
-    [ "$SDK" -lt 34 ] || SYSTEM_SOURCE="$APEX_CERT_DIR"
+    # Follow AOSP Conscrypt's Android 14+ default: prefer the updatable
+    # APEX CA directory only when it is present and nonempty. Otherwise the
+    # platform falls back to the system directory. A per-process Java
+    # system.certs.enabled override cannot be inferred from a root shell.
+    select_system_source
     CONFIGURED_MODE=compatible
     if [ -f "$MODDIR/mode.conf" ]; then
         value=$(sed -n 's/^[[:space:]]*mode[[:space:]]*=[[:space:]]*//p' "$MODDIR/mode.conf" | head -n1 | tr -d '\r' | sed 's/[[:space:]]*$//')
@@ -28,13 +31,21 @@ init_paths() {
     return 0
 }
 
+select_system_source() {
+    SYSTEM_SOURCE="$SYSTEM_CERT_DIR"
+    if [ "$SDK" -ge 34 ] && [ -d "$APEX_CERT_DIR" ] &&
+       [ -n "$(ls -A "$APEX_CERT_DIR" 2>/dev/null)" ]; then
+        SYSTEM_SOURCE="$APEX_CERT_DIR"
+    fi
+}
+
 print_log() { printf '[MoveCertificate] %s\n' "$*" >> "$LOG_PATH"; }
 
 write_runtime() {
     local state="$1" reason="${2:-none}"
     {
-        printf 'boot_id=%s\nconfigured_mode=%s\neffective_mode=%s\nmode_reason=%s\nstate=%s\nreason=%s\n' \
-            "$BOOT_ID" "$CONFIGURED_MODE" "$CURRENT_MODE" "$MODE_REASON" "$state" "$reason"
+        printf 'boot_id=%s\nconfigured_mode=%s\neffective_mode=%s\nmode_reason=%s\nsystem_source=%s\nstate=%s\nreason=%s\n' \
+            "$BOOT_ID" "$CONFIGURED_MODE" "$CURRENT_MODE" "$MODE_REASON" "$SYSTEM_SOURCE" "$state" "$reason"
     } > "$RUNTIME.tmp" && chmod 600 "$RUNTIME.tmp" && mv -f "$RUNTIME.tmp" "$RUNTIME"
 }
 
@@ -65,8 +76,36 @@ cert_to_der() {
     [ "$byte" = 30 ] && [ -s "$output" ]
 }
 
-file_digest() { sha256sum "$1" | cut -d' ' -f1; }
+file_digest() {
+    local output
+    output=$(sha256sum "$1") || return 1
+    printf '%s\n' "${output%% *}"
+}
 
+snapshot_user_sources() {
+    local output="$1" user_dir input name origin owner digest
+    : > "$output" || return 1
+    for user_dir in ${USER_CERT_DIRS:-/data/misc/user/*/cacerts-added} "$CUSTOM_CERT_DIR"; do
+        [ -d "$user_dir" ] || continue
+        origin=user
+        [ "$user_dir" != "$CUSTOM_CERT_DIR" ] || origin=custom
+        for input in "$user_dir"/*; do
+            [ -f "$input" ] && [ ! -L "$input" ] || continue
+            name=${input##*/}
+            if [ "$origin" = user ]; then
+                valid_cert_name "$name" || continue
+            else
+                printf '%s\n' "$name" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_.-]*$' || continue
+                owner=$(stat -c '%u' "$input" 2>/dev/null)
+                [ "$owner" = 0 ] || continue
+            fi
+            digest=$(file_digest "$input") || return 1
+            printf '%s\t%s\n' "$input" "$digest" >> "$output" || return 1
+        done
+    done
+    sort -o "$output" "$output" || return 1
+    return 0
+}
 validate_selections() {
     [ -f "$SELECTION_PATH" ] || return 0
     [ ! -L "$SELECTION_PATH" ] || return 1
@@ -86,7 +125,7 @@ certificate_enabled() {
 }
 
 prepare_cert_store() {
-    local stage input name hash digest target index prior rc owner origin user_dir original_count=0
+    local stage input name hash digest target index prior rc owner origin user_dir original_count=0 native_now=0
     validate_selections || { print_log 'ERROR: invalid certificate selections'; return 1; }
     prior="$MODDIR/.state.previous"
     if [ -d "$prior" ]; then
@@ -120,6 +159,13 @@ prepare_cert_store() {
         return 1
     fi
     cp "$stage/index.tsv" "$stage/native.tsv" || { remove_stage "$stage"; return 1; }
+    # Snapshot eligible user/profile/custom inputs before reading them. This catches
+    # concurrent additions, removals and replacements before the store is published.
+    if ! snapshot_user_sources "$stage/user-sources.before"; then
+        print_log 'ERROR: cannot snapshot user certificate sources'
+        remove_stage "$stage"
+        return 1
+    fi
     # Validate native hash sequences before adding any files.
     for input in "$stage/certs"/*; do
         name=${input##*/}; hash=${name%.*}; index=${name##*.}
@@ -180,17 +226,46 @@ prepare_cert_store() {
             printf '%s\t%s\t%s\tpending\n' "$digest" "$target" "$input" >> "$stage/sources.tsv"
         done
     done
-    # Recheck every original file byte-for-byte before publishing the new set.
+    if ! set_cert_permissions "$stage/certs" "$SYSTEM_SOURCE"; then
+        remove_stage "$stage"; return 1
+    fi
+    # Recheck native bytes and names after all staging work, immediately before publication.
     while IFS= read -r name; do
         cmp -s "$SYSTEM_SOURCE/$name" "$stage/certs/$name" || { remove_stage "$stage"; return 1; }
     done < "$stage/system.txt"
-    if ! set_cert_permissions "$stage/certs" "$SYSTEM_SOURCE"; then
-        remove_stage "$stage"; return 1
+    # Checking copied files is insufficient if the native CA set changed while
+    # preparing user inputs. The selected trust-store set must stay identical.
+    native_now=0
+    for input in "$SYSTEM_SOURCE"/*; do
+        [ -f "$input" ] || continue
+        name=${input##*/}
+        valid_cert_name "$name" || continue
+        native_now=$((native_now + 1))
+        if ! grep -Fxq "$name" "$stage/system.txt"; then
+            print_log "ERROR: native certificate set changed during preparation: $name"
+            remove_stage "$stage"
+            return 1
+        fi
+    done
+    if [ "$native_now" -ne "$original_count" ]; then
+        print_log 'ERROR: native certificate count changed during preparation'
+        remove_stage "$stage"
+        return 1
+    fi
+    if ! snapshot_user_sources "$stage/user-sources.after"; then
+        print_log 'ERROR: cannot recheck user certificate sources'
+        remove_stage "$stage"
+        return 1
+    fi
+    if ! cmp -s "$stage/user-sources.before" "$stage/user-sources.after"; then
+        print_log 'ERROR: user certificate sources changed during preparation'
+        remove_stage "$stage"
+        return 1
     fi
     mv "$stage/sources.tsv" "$stage/certificate-sources.tsv" && \
         mv "$stage/system.txt" "$stage/system_certs.txt" && \
         chmod 600 "$stage/certificate-sources.tsv" "$stage/system_certs.txt" || { remove_stage "$stage"; return 1; }
-    rm -f "$stage/current.der" "$stage/index.tsv" "$stage/native.tsv"
+    rm -f "$stage/current.der" "$stage/index.tsv" "$stage/native.tsv" "$stage/user-sources.before" "$stage/user-sources.after"
     if [ -d "$MODDIR/state" ]; then mv "$MODDIR/state" "$prior" || { remove_stage "$stage"; return 1; }; fi
     if ! mv "$stage" "$MODDIR/state"; then
         [ ! -d "$prior" ] || mv "$prior" "$MODDIR/state"
@@ -201,6 +276,62 @@ prepare_cert_store() {
     print_log "Prepared trust store: native=$original_count total=$(ls -1 "$MODULE_CERT_DIR" | wc -l)"
     return 0
 }
+
+# Compare current certificate inputs with the boot manifest. This is a
+# read-only, on-demand check; never replace the active trust store.
+check_certificate_sources() (
+    [ -r "$MANIFEST" ] || { echo 'source_check=unavailable reason=manifest_missing'; exit 2; }
+    umask 077
+    work=$(mktemp -d "$MODDIR/.diagnostic.XXXXXX") || exit 2
+    trap 'rm -rf "$work"' EXIT
+    changes=0
+    unknown=0
+    for user_dir in ${USER_CERT_DIRS:-/data/misc/user/*/cacerts-added} "$CUSTOM_CERT_DIR"; do
+        [ -d "$user_dir" ] || continue
+        origin=user
+        [ "$user_dir" != "$CUSTOM_CERT_DIR" ] || origin=custom
+        for input in "$user_dir"/*; do
+            [ -f "$input" ] && [ ! -L "$input" ] || continue
+            name=${input##*/}
+            if [ "$origin" = user ]; then
+                valid_cert_name "$name" || continue
+            else
+                printf '%s\n' "$name" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_.-]*$' || continue
+                [ "$(stat -c '%u' "$input")" = 0 ] || continue
+            fi
+            if ! cert_to_der "$input" "$work/current.der" "$origin"; then
+                printf 'source_status=unverified path=%s\n' "$input"
+                unknown=$((unknown + 1))
+                continue
+            fi
+            digest=$(file_digest "$work/current.der")
+            if [ "${#digest}" -ne 64 ]; then
+                printf 'source_status=unverified path=%s\n' "$input"
+                unknown=$((unknown + 1))
+                continue
+            fi
+            previous=$(awk -F '\t' -v p="$input" '$3 == p && $4 != "removed" {print $1; exit}' "$MANIFEST")
+            if [ -z "$previous" ]; then
+                printf 'source_status=new path=%s\n' "$input"
+                changes=$((changes + 1))
+            elif [ "$previous" != "$digest" ]; then
+                printf 'source_status=changed path=%s\n' "$input"
+                changes=$((changes + 1))
+            fi
+        done
+    done
+    tab=$(printf '\t')
+    while IFS="$tab" read -r digest target input state; do
+        [ "$state" != removed ] || continue
+        if [ ! -f "$input" ] || [ -L "$input" ]; then
+            printf 'source_status=missing path=%s\n' "$input"
+            changes=$((changes + 1))
+        fi
+    done < "$MANIFEST"
+    printf 'source_changes=%s source_unverified=%s\n' "$changes" "$unknown"
+    [ "$unknown" -eq 0 ] || exit 2
+    [ "$changes" -eq 0 ]
+)
 
 remove_stage() {
     case "$1" in "$MODDIR"/.stage.*) [ ! -L "$1" ] && rm -rf "$1" ;; *) return 1 ;; esac
@@ -254,6 +385,26 @@ ns_run() {
     return 1
 }
 
+# Filesystem evidence, not a claim about a particular app's Java TrustManager.
+report_system_store_paths() {
+    local path file name count
+    printf 'selected_system_store=%s\n' "$SYSTEM_SOURCE"
+    for path in "$SYSTEM_CERT_DIR" "$APEX_CERT_DIR"; do
+        count=0
+        if [ -d "$path" ]; then
+            for file in "$path"/*; do
+                [ -f "$file" ] || continue
+                name=${file##*/}
+                valid_cert_name "$name" || continue
+                count=$((count + 1))
+            done
+            printf 'store_candidate=%s certificate_count=%s\n' "$path" "$count"
+        else
+            printf 'store_candidate=%s unavailable=1\n' "$path"
+        fi
+    done
+}
+
 prepare_mount_source() {
     local file source_id mounted_id
     mkdir -p "$TEMP_DIR" || return 1
@@ -266,31 +417,42 @@ prepare_mount_source() {
     }
 }
 
+# Unwind only binds created by this invocation, in reverse order.
+rollback_mount_targets() {
+    local target
+    for target in "$@"; do
+        umount "$target" || print_log "ERROR: mount rollback failed target=$target"
+    done
+}
+
 mount_in_current_namespace() {
-    local source="$1" target source_id target_id targets directory apex_identity apex_parent
+    local source="$1" target source_id target_id targets directory apex_identity apex_parent mounted=''
     targets="$SYSTEM_SOURCE"
-    if [ "$SDK" -ge 34 ]; then
+    if [ "$SDK" -ge 34 ] && [ "$SYSTEM_SOURCE" = "$APEX_CERT_DIR" ]; then
         apex_parent=${APEX_CERT_DIR%/com.android.conscrypt/cacerts}
-        apex_identity=$(stat -c '%d:%i' "$apex_parent/com.android.conscrypt") || return 1
+        apex_identity=$(stat -L -c '%d:%i' "$apex_parent/com.android.conscrypt") || return 1
         for directory in "$apex_parent"/com.android.conscrypt@*; do
             [ -d "$directory/cacerts" ] || continue
-            if [ "$(stat -c '%d:%i' "$directory")" = "$apex_identity" ]; then
+            if [ "$(stat -L -c '%d:%i' "$directory")" = "$apex_identity" ]; then
                 targets="$targets $directory/cacerts"
             fi
         done
     fi
-    if [ "$CURRENT_MODE" = builtin ]; then verify_cert_mount "$SYSTEM_SOURCE" builtin; return $?; fi
-    [ -d "$source" ] && [ -d "$SYSTEM_SOURCE" ] || return 1
-    source_id=$(stat -c '%d:%i' "$source") || return 1
+    if [ "$CURRENT_MODE" = builtin ]; then
+        for target in $targets; do verify_cert_mount "$target" builtin || return 1; done
+        return 0
+    fi
+    # Reject a stale/incomplete source before touching any live target.
+    verify_cert_mount "$source" compatible || return 1
+    source_id=$(stat -L -c '%d:%i' "$source") || return 1
     for target in $targets; do
-        [ -d "$target" ] || return 1
-        target_id=$(stat -c '%d:%i' "$target") || return 1
+        [ -d "$target" ] || { rollback_mount_targets $mounted; return 1; }
+        target_id=$(stat -L -c '%d:%i' "$target") || { rollback_mount_targets $mounted; return 1; }
         if [ "$source_id" != "$target_id" ]; then
-            mount -o bind "$source" "$target" || return 1
-            verify_cert_mount "$target" compatible || { umount "$target"; return 1; }
-        else
-            verify_cert_mount "$target" compatible || return 1
+            mount -o bind "$source" "$target" || { rollback_mount_targets $mounted; return 1; }
+            mounted="$target $mounted"
         fi
+        verify_cert_mount "$target" compatible || { rollback_mount_targets $mounted; return 1; }
     done
     return 0
 }
@@ -299,15 +461,15 @@ prepare_builtin() {
     local destination file destinations directory apex_identity apex_parent
     clean_builtin_outputs || return 1
     destinations="$MODDIR/system/etc/security/cacerts"
-    if [ "$SDK" -ge 34 ]; then
+    if [ "$SDK" -ge 34 ] && [ "$SYSTEM_SOURCE" = "$APEX_CERT_DIR" ]; then
         # Mountify and other partition-aware providers collect system/apex.
         # Keep root/apex as well for providers that explicitly support it.
         destinations="$MODDIR/apex/com.android.conscrypt/cacerts $MODDIR/system/apex/com.android.conscrypt/cacerts"
         apex_parent=${APEX_CERT_DIR%/com.android.conscrypt/cacerts}
-        apex_identity=$(stat -c '%d:%i' "$apex_parent/com.android.conscrypt") || return 1
+        apex_identity=$(stat -L -c '%d:%i' "$apex_parent/com.android.conscrypt") || return 1
         for directory in "$apex_parent"/com.android.conscrypt@*; do
             [ -d "$directory/cacerts" ] || continue
-            [ "$(stat -c '%d:%i' "$directory")" != "$apex_identity" ] || destinations="$destinations $MODDIR/apex/${directory##*/}/cacerts $MODDIR/system/apex/${directory##*/}/cacerts"
+            [ "$(stat -L -c '%d:%i' "$directory")" != "$apex_identity" ] || destinations="$destinations $MODDIR/apex/${directory##*/}/cacerts $MODDIR/system/apex/${directory##*/}/cacerts"
         done
     fi
     for destination in $destinations; do
@@ -425,7 +587,21 @@ process_name() {
 }
 
 load_runtime_mode() {
+    local prepared_source
     [ -f "$RUNTIME" ] && [ "$(sed -n 's/^boot_id=//p' "$RUNTIME")" = "$BOOT_ID" ] || return 1
+    # Conscrypt's APEX availability can vary as namespaces and boot mounts
+    # become ready. Never validate a store different from the one prepared.
+    prepared_source=$(sed -n 's/^system_source=//p' "$RUNTIME" | head -n1)
+    case "$prepared_source" in
+        "$SYSTEM_CERT_DIR"|"$APEX_CERT_DIR") ;;
+        *) printf 'reason=prepared_system_source_invalid\n' >&2; return 1 ;;
+    esac
+    if [ "$prepared_source" != "$SYSTEM_SOURCE" ]; then
+        printf 'reason=system_source_changed prepared=%s observed=%s\n' \
+            "$prepared_source" "$SYSTEM_SOURCE" >&2
+        return 1
+    fi
+    SYSTEM_SOURCE="$prepared_source"
     CURRENT_MODE=$(sed -n 's/^effective_mode=//p' "$RUNTIME")
     CONFIGURED_MODE=$(sed -n 's/^configured_mode=//p' "$RUNTIME")
     MODE_REASON=$(sed -n 's/^mode_reason=//p' "$RUNTIME")

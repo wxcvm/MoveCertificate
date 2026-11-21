@@ -44,6 +44,14 @@
                 <p id="logContent" data-i18n="logPlaceholder">点击下方刷新按钮加载日志…</p>
             </div>
             <button class="refresh-btn" id="refreshLogBtn">🔄 刷新日志</button>
+            <div class="groupbox">
+                <span class="groupbox-title" data-i18n="healthTitle">实时证书健康诊断</span>
+                <p data-i18n="healthHint">只读检查当前挂载及证书来源变化；可选填 APP 进程 PID（空格分隔）。</p>
+                <input id="healthPids" type="text" inputmode="numeric" autocomplete="off" aria-label="APP PID" placeholder="APP PID (optional)">
+                <button class="refresh-btn" id="healthCheckBtn" data-i18n="healthCheck">立即检查</button>
+                <p id="healthStatus" role="status"></p>
+                <pre id="healthOutput" class="health-output"></pre>
+            </div>
         </section>
 
         <!-- Tab 4：设置 -->

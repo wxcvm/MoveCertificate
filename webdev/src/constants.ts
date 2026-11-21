@@ -12,13 +12,14 @@ export const MANIFEST_PATH = `${MODULE_DIR}/state/certificate-sources.tsv`;
 export const RUNTIME_PATH = `${MODULE_DIR}/runtime.conf`;
 export const STATE_BOOT_PATH = `${MODULE_DIR}/state/boot_id`;
 export const SELECTION_PATH = `${MODULE_DIR}/cert-selection.tsv`;
-export const CERT_QUERY_API = 'https://cert.ys1231.cn/query';
 export type RunMode = 'compatible' | 'builtin';
 export type CertStatus = 'success' | 'failed' | 'excluded' | 'disabled' | 'native' | 'unverified' | 'removed' | 'unknown';
 export interface RuntimeInfo {
     sdk: number;
     bootId: string;
     effectiveMode: RunMode | null;
+    /** CA directory selected by this boot's system-source snapshot, including trailing slash. */
+    systemSource: string | null;
     state: string;
     reason: string;
     modeReason: string;

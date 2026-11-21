@@ -1,3 +1,21 @@
+## 2026-11-21：本地证书名称与真实 Sonar 质量门禁
+
+- 旧 WebUI 在证书名称缓存未命中时向第三方 `cert.ys1231.cn/query` 发送证书 Base64。即便 X.509 证书不包含私钥，其主题、签发者等字段仍可能包含内部组织或域名信息。因此取消自动外发，改为手机本地 `openssl x509 -subject -nameopt RFC2253`（先 PEM 后 DER），解析器缺失时仅显示 Unknown，不降低 TLS 验证安全性；既有指纹缓存仍本地使用。
+- 测试覆盖 PEM、DER、本地解析器缺失和不产生外部请求。所有名称解析仅在本机执行，禁止在失败时回退至远程服务。
+- 原 SonarCloud Action 的成功只说明扫描报告被服务器接收。现在开启 `sonar.qualitygate.wait=true`、超时 300 秒，质量门禁变红或超时时应让工作流失败，而非继续报告绿色。保持官方规则与阈值，不伪造覆盖率。
+- 剩余设计风险：模块扫描不同 Android 用户的 `cacerts-added` 并可能提升为全局系统信任；修订默认策略需单独设计版本化迁移与主用户/工作资料验收，不作为本次本地名称修复的隐式副作用。
+
+## 2026-11-21：遵循最新 AOSP Conscrypt 系统 CA 目录选择
+
+根据 AOSP 的 TrustedCertificateStore/SystemCertificateSource 实现，Android 14+ 在 APEX 根证书目录可用且非空时优先选择 `/apex/com.android.conscrypt/cacerts`，否则回退到 `/system/etc/security/cacerts`。后续修复仅沿用此官方信任库结构，不默认镜像两套目录，也不尝试替换应用内部的原生 TLS 验证器。部分进程可通过 Java `system.certs.enabled` 属性选择传统目录；模块无法仅凭全局 Shell 环境推断某个进程的这一属性或其原生 TLS 路径。
+
+模块初始化时选择活动来源，仍逐字节保留该来源的原生证书；仅对经过验证且被用户启用的额外 CA 进行合并，并使用已有挂载命名空间验证与回滚机制。与 Android AOSP 的目录选择保持一致，并不意味着对所有自建 SSL_CTX 或固定证书的应用都保证兼容。原双目录镜像候选 PR #3 已关闭且未合并。
+
+源码：
+- https://android.googlesource.com/platform/external/conscrypt/+/master/platform/src/main/java/org/conscrypt/TrustedCertificateStore.java
+- https://android.googlesource.com/platform/frameworks/base/+/master/core/java/android/security/net/config/SystemCertificateSource.java
+- https://source.android.com/docs/core/ota/modular-system/conscrypt
+
 # v1.6.8 修复与验证
 
 正式版新增：两种模式都先校验当前证书库，已正确挂载时不调用挂载脚本。内容确实

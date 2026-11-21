@@ -1,7 +1,7 @@
 import { exec } from 'kernelsu';
 import {
     MODULE_DIR, CERT_HIGH_SYSTEM, CERT_LOW_SYSTEM, CERT_MODULE, MODULE_PROP_PATH,
-    INSTALL_LOG_PATH, MODE_CONF_PATH, CERT_NAME_CACHE_PATH, CERT_QUERY_API,
+    INSTALL_LOG_PATH, MODE_CONF_PATH, CERT_NAME_CACHE_PATH,
     MANIFEST_PATH, RUNTIME_PATH, STATE_BOOT_PATH, SELECTION_PATH,
 } from './constants.js';
 import type { RunMode, CertEntry, CertStatus, RuntimeInfo } from './constants.js';
@@ -52,27 +52,29 @@ function saveName(fingerprint: string, name: string): void {
         }
     }).catch(error => console.error('写入证书名称缓存失败:', error));
 }
+/** Read the certificate subject on-device; never upload private CA data. */
 export async function getCertName(path: string, fingerprint?: string): Promise<string> {
-    // Legacy subject-hash entries cannot identify a renewed or colliding CA.
     if (fingerprint) {
         const cache = await readCache();
         if (cache[fingerprint]) return cache[fingerprint];
     }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    try {
-        const data = await readFileBase64(path);
-        const response = await fetch(CERT_QUERY_API, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: 'cert base64', data }), signal: controller.signal,
-        });
-        if (!response.ok) return 'Unknown';
-        const result: unknown = await response.json();
-        if (!result || typeof result !== 'object' || !('result' in result) || typeof result.result !== 'string') return 'Unknown';
-        if (fingerprint) saveName(fingerprint, result.result);
-        return result.result;
-    } catch { return 'Unknown'; } finally { clearTimeout(timer); }
+    // Android builds may lack openssl. In that case keep the filename and
+    // report an unknown name, rather than silently calling a network API.
+    const file = quote(path);
+    let result = await exec(`openssl x509 -in ${file} -noout -subject -nameopt RFC2253 2>/dev/null`) as ExecResult;
+    if (result.errno !== 0) {
+        result = await exec(`openssl x509 -inform DER -in ${file} -noout -subject -nameopt RFC2253 2>/dev/null`) as ExecResult;
+    }
+    if (result.errno !== 0) return 'Unknown';
+    const subject = String(result.stdout).trim().replace(/^subject\s*=\s*/i, '').trim();
+    if (!subject) return 'Unknown';
+    // RFC2253 output is human-readable and may contain escaped commas.
+    // Display the subject locally; never interpolate it into a shell command.
+    const name = subject.slice(0, 180);
+    if (fingerprint) saveName(fingerprint, name);
+    return name;
 }
+
 export async function getRuntimeInfo(): Promise<RuntimeInfo> {
     const sdk = Number(await run('getprop ro.build.version.sdk'));
     if (!Number.isInteger(sdk) || sdk < 24) throw new Error('获取系统版本失败');
@@ -84,8 +86,13 @@ export async function getRuntimeInfo(): Promise<RuntimeInfo> {
     }));
     const current = values.boot_id === bootId;
     const mode = current ? values.effective_mode : null;
+    // Use the exact CA source captured during preparation for this boot,
+    // never a guessed path based on the Android SDK alone.
+    const systemSource = current && values.system_source === CERT_HIGH_SYSTEM.slice(0, -1) ? CERT_HIGH_SYSTEM
+        : current && values.system_source === CERT_LOW_SYSTEM.slice(0, -1) ? CERT_LOW_SYSTEM : null;
     return {
         sdk, bootId, effectiveMode: mode === 'builtin' || mode === 'compatible' ? mode : null,
+        systemSource,
         state: current ? values.state ?? 'unknown' : 'unknown',
         reason: current ? values.reason ?? 'none' : 'no_current_boot_status',
         modeReason: current ? values.mode_reason ?? 'none' : 'none',
@@ -118,7 +125,7 @@ export async function getInstallCertResults(): Promise<CertEntry[]> {
     const grouped = new Map<string, SourceRow[]>();
     const selections = await readSelections();
     for (const row of parseManifest(data)) grouped.set(row.fingerprint, [...grouped.get(row.fingerprint) ?? [], row]);
-    const system = runtime.sdk >= 34 ? CERT_HIGH_SYSTEM : CERT_LOW_SYSTEM;
+    const system = runtime.systemSource;
     return Promise.all(Array.from(grouped, async ([fingerprint, rows]): Promise<CertEntry> => {
         const row = rows.find(item => item.state === 'pending') ?? rows[0]!;
         const filename = row.target === '-' ? row.source.split('/').pop()! : row.target;
@@ -129,6 +136,7 @@ export async function getInstallCertResults(): Promise<CertEntry[]> {
         else if (row.state === 'native') status = 'native';
         else if (row.state === 'unverified') status = 'unverified';
         else if (runtime.state !== 'ready') status = runtime.state === 'failed' ? 'failed' : 'unknown';
+        else if (!system) status = 'unknown'; // Missing/invalid source: never invent a success or failure.
         else {
             const result = await exec(`test -r ${quote(CERT_MODULE + row.target)} && test -r ${quote(system + row.target)} && cmp -s ${quote(CERT_MODULE + row.target)} ${quote(system + row.target)}`) as ExecResult;
             status = result.errno === 0 ? 'success' : 'failed';
@@ -176,4 +184,13 @@ export async function setMode(mode: RunMode): Promise<void> {
     if (mode !== 'compatible' && mode !== 'builtin') throw new Error('非法的运行模式');
     await run(`sh ${quote(`${MODULE_DIR}/sh/set-mode.sh`)} ${quote(mode)}`);
     if (await getCurrentMode() !== mode) throw new Error('模式配置写入校验失败');
+}
+
+/** On-demand diagnostic; nonzero exit codes still contain useful evidence. */
+export async function getHealthDiagnostic(pids: string): Promise<{ status: number; output: string }> {
+    const ids = pids.trim().split(/\s+/).filter(Boolean);
+    if (ids.some(id => !/^[1-9]\d*$/.test(id))) throw new Error('Invalid PID');
+    const result = await exec('sh ' + quote(MODULE_DIR + '/sh/diagnose.sh') + (ids.length ? ' ' + ids.join(' ') : '')) as ExecResult;
+    const output = [String(result.stdout).trim(), String(result.stderr).trim()].filter(Boolean).join('\n');
+    return { status: result.errno, output };
 }
