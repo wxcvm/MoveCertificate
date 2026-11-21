@@ -1,7 +1,7 @@
 import { exec } from 'kernelsu';
 import {
     MODULE_DIR, CERT_HIGH_SYSTEM, CERT_LOW_SYSTEM, CERT_MODULE, MODULE_PROP_PATH,
-    INSTALL_LOG_PATH, MODE_CONF_PATH, CERT_NAME_CACHE_PATH, CERT_QUERY_API,
+    INSTALL_LOG_PATH, MODE_CONF_PATH, CERT_NAME_CACHE_PATH,
     MANIFEST_PATH, RUNTIME_PATH, STATE_BOOT_PATH, SELECTION_PATH,
 } from './constants.js';
 import type { RunMode, CertEntry, CertStatus, RuntimeInfo } from './constants.js';
@@ -52,27 +52,29 @@ function saveName(fingerprint: string, name: string): void {
         }
     }).catch(error => console.error('写入证书名称缓存失败:', error));
 }
+/** Read the certificate subject on-device; never upload private CA data. */
 export async function getCertName(path: string, fingerprint?: string): Promise<string> {
-    // Legacy subject-hash entries cannot identify a renewed or colliding CA.
     if (fingerprint) {
         const cache = await readCache();
         if (cache[fingerprint]) return cache[fingerprint];
     }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    try {
-        const data = await readFileBase64(path);
-        const response = await fetch(CERT_QUERY_API, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: 'cert base64', data }), signal: controller.signal,
-        });
-        if (!response.ok) return 'Unknown';
-        const result: unknown = await response.json();
-        if (!result || typeof result !== 'object' || !('result' in result) || typeof result.result !== 'string') return 'Unknown';
-        if (fingerprint) saveName(fingerprint, result.result);
-        return result.result;
-    } catch { return 'Unknown'; } finally { clearTimeout(timer); }
+    // Android builds may lack openssl. In that case keep the filename and
+    // report an unknown name, rather than silently calling a network API.
+    const file = quote(path);
+    let result = await exec(`openssl x509 -in ${file} -noout -subject -nameopt RFC2253 2>/dev/null`) as ExecResult;
+    if (result.errno !== 0) {
+        result = await exec(`openssl x509 -inform DER -in ${file} -noout -subject -nameopt RFC2253 2>/dev/null`) as ExecResult;
+    }
+    if (result.errno !== 0) return 'Unknown';
+    const subject = String(result.stdout).trim().replace(/^subject\\s*=\\s*/i, '').trim();
+    if (!subject) return 'Unknown';
+    // RFC2253 output is human-readable and may contain escaped commas.
+    // Display the subject locally; never interpolate it into a shell command.
+    const name = subject.slice(0, 180);
+    if (fingerprint) saveName(fingerprint, name);
+    return name;
 }
+
 export async function getRuntimeInfo(): Promise<RuntimeInfo> {
     const sdk = Number(await run('getprop ro.build.version.sdk'));
     if (!Number.isInteger(sdk) || sdk < 24) throw new Error('获取系统版本失败');
