@@ -66,7 +66,7 @@ export async function getCertName(path: string, fingerprint?: string): Promise<s
         result = await exec(`openssl x509 -inform DER -in ${file} -noout -subject -nameopt RFC2253 2>/dev/null`) as ExecResult;
     }
     if (result.errno !== 0) return 'Unknown';
-    const subject = String(result.stdout).trim().replace(/^subject\\s*=\\s*/i, '').trim();
+    const subject = String(result.stdout).trim().replace(/^subject\s*=\s*/i, '').trim();
     if (!subject) return 'Unknown';
     // RFC2253 output is human-readable and may contain escaped commas.
     // Display the subject locally; never interpolate it into a shell command.
