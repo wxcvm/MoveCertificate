@@ -32,6 +32,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The existing node:test cases execute the real TypeScript inside a VM.
+      # Node V8 coverage is converted back to the original TS source lines.
+      # No synthetic hits and no Quality Gate threshold overrides.
+      - name: Set up Node for real TS coverage
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+
+      - name: Execute tests and generate audited LCOV
+        run: |
+          set -euo pipefail
+          mkdir -p coverage/v8
+          NODE_V8_COVERAGE=coverage/v8 node --test tests/*.test.mjs
+          node scripts/v8-coverage-to-lcov.mjs coverage/v8 coverage/lcov.info
+          test -s coverage/lcov.info
+          sed -n '/^SF:/p; /^LF:/p; /^LH:/p' coverage/lcov.info
+
       - name: SonarCloud Scan and Quality Gate
         uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
         # Scanner upload succeeding does not imply the Quality Gate passed.
