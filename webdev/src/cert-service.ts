@@ -84,8 +84,13 @@ export async function getRuntimeInfo(): Promise<RuntimeInfo> {
     }));
     const current = values.boot_id === bootId;
     const mode = current ? values.effective_mode : null;
+    // Use the exact CA source captured during preparation for this boot,
+    // never a guessed path based on the Android SDK alone.
+    const systemSource = current && values.system_source === CERT_HIGH_SYSTEM.slice(0, -1) ? CERT_HIGH_SYSTEM
+        : current && values.system_source === CERT_LOW_SYSTEM.slice(0, -1) ? CERT_LOW_SYSTEM : null;
     return {
         sdk, bootId, effectiveMode: mode === 'builtin' || mode === 'compatible' ? mode : null,
+        systemSource,
         state: current ? values.state ?? 'unknown' : 'unknown',
         reason: current ? values.reason ?? 'none' : 'no_current_boot_status',
         modeReason: current ? values.mode_reason ?? 'none' : 'none',
@@ -118,7 +123,7 @@ export async function getInstallCertResults(): Promise<CertEntry[]> {
     const grouped = new Map<string, SourceRow[]>();
     const selections = await readSelections();
     for (const row of parseManifest(data)) grouped.set(row.fingerprint, [...grouped.get(row.fingerprint) ?? [], row]);
-    const system = runtime.sdk >= 34 ? CERT_HIGH_SYSTEM : CERT_LOW_SYSTEM;
+    const system = runtime.systemSource;
     return Promise.all(Array.from(grouped, async ([fingerprint, rows]): Promise<CertEntry> => {
         const row = rows.find(item => item.state === 'pending') ?? rows[0]!;
         const filename = row.target === '-' ? row.source.split('/').pop()! : row.target;
@@ -129,6 +134,7 @@ export async function getInstallCertResults(): Promise<CertEntry[]> {
         else if (row.state === 'native') status = 'native';
         else if (row.state === 'unverified') status = 'unverified';
         else if (runtime.state !== 'ready') status = runtime.state === 'failed' ? 'failed' : 'unknown';
+        else if (!system) status = 'unknown'; // Missing/invalid source: never invent a success or failure.
         else {
             const result = await exec(`test -r ${quote(CERT_MODULE + row.target)} && test -r ${quote(system + row.target)} && cmp -s ${quote(CERT_MODULE + row.target)} ${quote(system + row.target)}`) as ExecResult;
             status = result.errno === 0 ? 'success' : 'failed';
