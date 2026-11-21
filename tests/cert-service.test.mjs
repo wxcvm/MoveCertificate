@@ -36,7 +36,7 @@ function service(options = {}) {
     });
     const code = stripTypeScriptTypes(constants.replaceAll('export ', '') + '\n' + source
         .replace(/^import .*?;\s*/gms, '').replaceAll('export ', ''));
-    vm.runInContext(code + '\nthis.api={getInstallCertResults,getRuntimeInfo,getCurrentMode,setMode,deleteCert,readFileBase64,getVersionInfo,setCertEnabled};', context);
+    vm.runInContext(code + '\nthis.api={getInstallCertResults,getRuntimeInfo,getCurrentMode,setMode,deleteCert,readFileBase64,getVersionInfo,setCertEnabled,getHealthDiagnostic};', context);
     return { api: context.api, calls };
 }
 test('all user sources deduplicate by fingerprint, not subject filename', async () => {
@@ -153,4 +153,31 @@ test('stale boot snapshot never selects a system CA verification path', async ()
     assert.equal((await api.getRuntimeInfo()).systemSource, null);
     assert.equal((await api.getInstallCertResults())[0].status, 'unknown');
     assert.ok(!calls.some(c => c.includes('cmp -s')));
+});
+
+test('health diagnostic rejects shell syntax and malformed PIDs before execution', async () => {
+    const { api, calls } = service();
+    await assert.rejects(api.getHealthDiagnostic('123;id'), /Invalid PID/);
+    await assert.rejects(api.getHealthDiagnostic('1 0'), /Invalid PID/);
+    await assert.rejects(api.getHealthDiagnostic('-1'), /Invalid PID/);
+    assert.equal(calls.length, 0);
+});
+test('health diagnostic passes only validated PIDs and preserves command output', async () => {
+    const { api, calls } = service({
+        exec: command => command.includes('/sh/diagnose.sh')
+            ? { errno: 0, stdout: 'namespace_check_status=0', stderr: '' } : null,
+    });
+    const result = await api.getHealthDiagnostic('123 456');
+    assert.equal(result.status, 0);
+    assert.equal(result.output, 'namespace_check_status=0');
+    assert.ok(calls.some(command => command.endsWith("'123 456'") === false && command.endsWith('123 456')));
+});
+test('health diagnostic keeps nonzero status and stderr as actionable evidence', async () => {
+    const { api } = service({
+        exec: command => command.includes('/sh/diagnose.sh')
+            ? { errno: 2, stdout: 'source_check_status=2', stderr: 'reason=manifest_missing' } : null,
+    });
+    const result = await api.getHealthDiagnostic('');
+    assert.equal(result.status, 2);
+    assert.equal(result.output, 'source_check_status=2\nreason=manifest_missing');
 });
