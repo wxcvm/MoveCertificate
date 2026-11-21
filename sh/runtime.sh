@@ -195,6 +195,25 @@ prepare_cert_store() {
     while IFS= read -r name; do
         cmp -s "$SYSTEM_SOURCE/$name" "$stage/certs/$name" || { remove_stage "$stage"; return 1; }
     done < "$stage/system.txt"
+    # Checking copied files is insufficient if a new native CA appeared while
+    # preparing user inputs. The selected trust-store set must stay identical.
+    native_now=0
+    for input in "$SYSTEM_SOURCE"/*; do
+        [ -f "$input" ] || continue
+        name=${input##*/}
+        valid_cert_name "$name" || continue
+        native_now=$((native_now + 1))
+        if ! grep -Fxq "$name" "$stage/system.txt"; then
+            print_log "ERROR: native certificate set changed during preparation: $name"
+            remove_stage "$stage"
+            return 1
+        fi
+    done
+    if [ "$native_now" -ne "$original_count" ]; then
+        print_log 'ERROR: native certificate count changed during preparation'
+        remove_stage "$stage"
+        return 1
+    fi
     if ! set_cert_permissions "$stage/certs" "$SYSTEM_SOURCE"; then
         remove_stage "$stage"; return 1
     fi
