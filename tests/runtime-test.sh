@@ -257,4 +257,72 @@ printf 'not a certificate\n' > "$MODDIR/user10/$HASH.2"
 output=$(check_certificate_sources)
 [ "$?" -eq 2 ] && printf '%s\n' "$output" | grep -q 'source_status=unverified' || fail 'invalid source not detected'
 ok 'source diagnostics distinguish unreadable certificate from verified change'
+
+# Optional native legacy CA mirror is opt-in and must preserve ROM CA files.
+setup
+SDK=37
+LEGACY_COMPAT=1
+SYSTEM_CERT_DIR="$MODDIR/legacy"
+mkdir -p "$SYSTEM_CERT_DIR"
+cp "$FIX/native.pem" "$SYSTEM_CERT_DIR/$HASH.0"
+cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+prepare_cert_store || fail 'legacy mirror preparation'
+validate_legacy_native_store || fail 'legacy original CA check'
+mount() {
+    printf 'bind %s\n' "$4" >> "$MODDIR/legacy-ops"
+    command cp "$3"/* "$4/"
+}
+mount_in_current_namespace "$MODULE_CERT_DIR" || fail 'legacy mirror did not verify both paths'
+verify_cert_mount "$SYSTEM_SOURCE" compatible || fail 'primary store incomplete'
+verify_cert_mount "$SYSTEM_CERT_DIR" compatible || fail 'legacy store incomplete'
+[ "$(wc -l < "$MODDIR/legacy-ops")" -eq 2 ] || fail 'expected two directory binds'
+cmp -s "$FIX/native.pem" "$SYSTEM_CERT_DIR/$HASH.0" || fail 'original legacy CA altered'
+ok 'legacy opt-in mirrors verified CA set without dropping native entries'
+before=$(wc -l < "$MODDIR/legacy-ops")
+mount_in_current_namespace "$MODULE_CERT_DIR" || fail 'validated mirror recheck'
+[ "$(wc -l < "$MODDIR/legacy-ops")" -eq "$before" ] || fail 'stacked second mount'
+ok 'legacy mirror is idempotent'
+cp "$FIX/collision.pem" "$SYSTEM_CERT_DIR/$HASH.4"
+if mount_in_current_namespace "$MODULE_CERT_DIR"; then fail 'unexpected legacy root accepted'; fi
+[ "$(wc -l < "$MODDIR/legacy-ops")" -eq "$before" ] || fail 'divergent legacy changed mounts'
+ok 'unexpected legacy CA rejects mirroring before touching APEX'
+mount() { echo "$*" >> "$TEST_ROOT/mounts"; return 1; }
+umount() { echo "$*" >> "$TEST_ROOT/unmounts"; return 0; }
+LEGACY_COMPAT=0
+
+# An APEX-capable builtin provider must supply the legacy overlay too.
+setup
+SDK=37
+CURRENT_MODE=builtin
+LEGACY_COMPAT=1
+SYSTEM_CERT_DIR="$MODDIR/legacy"
+APEX_CERT_DIR="$MODDIR/apex-source/com.android.conscrypt/cacerts"
+SYSTEM_SOURCE="$APEX_CERT_DIR"
+mkdir -p "$SYSTEM_CERT_DIR" "$SYSTEM_SOURCE"
+cp "$FIX/native.pem" "$SYSTEM_CERT_DIR/$HASH.0"
+cp "$FIX/native.pem" "$SYSTEM_SOURCE/$HASH.0"
+cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+prepare_cert_store && prepare_builtin || fail 'builtin legacy preparation'
+verify_cert_mount "$MODDIR/system/etc/security/cacerts" builtin || fail 'builtin legacy overlay incomplete'
+verify_cert_mount "$MODDIR/system/apex/com.android.conscrypt/cacerts" builtin || fail 'builtin APEX overlay incomplete'
+ok 'builtin opt-in prepares both APEX and legacy directories'
+LEGACY_COMPAT=0
+
+# The toggle is a per-boot snapshot, not an instantaneous runtime switch.
+(
+    MODDIR="$TEST_ROOT/snapshot"
+    mkdir -p "$MODDIR"
+    getprop() { echo 37; }
+    printf 'legacy_compat=1\n' > "$MODDIR/legacy-ca.conf"
+    init_paths || exit 1
+    [ "$LEGACY_COMPAT" = 1 ] || exit 1
+    write_runtime prepared || exit 1
+    printf 'legacy_compat=0\n' > "$MODDIR/legacy-ca.conf"
+    init_paths || exit 1
+    [ "$LEGACY_COMPAT" = 0 ] || exit 1
+    load_runtime_mode || exit 1
+    [ "$LEGACY_COMPAT" = 1 ] && [ "$LEGACY_TARGET" = "$SYSTEM_CERT_DIR" ]
+) || fail 'legacy snapshot changed after config edit'
+ok 'legacy opt-in is captured for the entire boot'
+
 printf 'PASS: %s shell regression cases\n' "$pass"
