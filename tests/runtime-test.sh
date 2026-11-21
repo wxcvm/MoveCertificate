@@ -436,6 +436,40 @@ if validate_legacy_native_store; then fail 'hidden legacy entry was ignored'; fi
 rm -f "$SYSTEM_CERT_DIR/.unexpected"
 ok 'legacy preflight rejects extra, changed and hidden native entries'
 
+# Android 17 device evidence: APEX contains two additional roots absent from
+# the byte-identical legacy subset. Use synthetic test file names and fixtures:
+# this verifies mount scope, not the identity or validity of real AdGuard CAs.
+setup
+SDK=37; CURRENT_MODE=compatible
+APEX_CERT_DIR="$MODDIR/apex/com.android.conscrypt/cacerts"
+SYSTEM_SOURCE="$APEX_CERT_DIR"
+LEGACY_TARGET="$SYSTEM_CERT_DIR"; LEGACY_COMPAT=1
+mkdir -p "$APEX_CERT_DIR" "$SYSTEM_CERT_DIR" "$MODULE_CERT_DIR"
+cp "$FIX/native.pem" "$APEX_CERT_DIR/$HASH.0"
+cp "$FIX/native.pem" "$SYSTEM_CERT_DIR/$HASH.0"
+cp "$FIX/native.pem" "$MODULE_CERT_DIR/$HASH.0"
+cp "$FIX/collision.pem" "$MODULE_CERT_DIR/11111111.0"
+cp "$FIX/collision.pem" "$MODULE_CERT_DIR/22222222.0"
+validate_legacy_native_store || fail 'two APEX-only CAs unexpectedly rejected'
+mount() {
+    command cp -p "$3"/* "$4/" || return 1
+    printf '%s\\n' "$4" >> "$MODDIR/mounts"
+}
+LEGACY_COMPAT=0; LEGACY_TARGET=''
+mount_in_current_namespace "$MODULE_CERT_DIR" || fail 'default APEX-only bind failed'
+[ "$(wc -l < "$MODDIR/mounts")" -eq 1 ] ||
+    fail 'default-off mode mounted more than selected APEX'
+[ ! -e "$SYSTEM_CERT_DIR/11111111.0" ] && [ ! -e "$SYSTEM_CERT_DIR/22222222.0" ] ||
+    fail 'default-off mode unexpectedly widened legacy trust'
+ok 'Android 17 APEX superset does not change legacy store by default'
+LEGACY_COMPAT=1; LEGACY_TARGET="$SYSTEM_CERT_DIR"
+mount_in_current_namespace "$MODULE_CERT_DIR" || fail 'two-root opt-in legacy mirror failed'
+verify_cert_mount "$SYSTEM_CERT_DIR" compatible ||
+    fail 'two APEX-only roots were not mirrored into the legacy store'
+cmp -s "$FIX/native.pem" "$SYSTEM_CERT_DIR/$HASH.0" ||
+    fail 'legacy original native certificate changed'
+ok 'opt-in mirrors two APEX-only roots while preserving the native legacy subset'
+
 # Recheck the legacy directory immediately before binding it; roll back an earlier APEX bind on drift.
 legacy_mount_setup() {
     setup
