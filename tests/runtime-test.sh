@@ -272,6 +272,21 @@ mount() {
     printf 'bind %s\n' "$4" >> "$MODDIR/legacy-ops"
     command cp "$3"/* "$4/"
 }
+# A mock copy is not a real bind, so reflect the source inode only after
+# the simulated mount; otherwise the duplicate-bind regression is meaningless.
+stat() {
+    if [ "$1" = -L ] && [ "$2" = -c ] && [ "$3" = '%d:%i' ]; then
+        case "$4" in
+            "$SYSTEM_SOURCE"|"$SYSTEM_CERT_DIR")
+                if grep -qFx "bind $4" "$MODDIR/legacy-ops" 2>/dev/null; then
+                    command stat -L -c '%d:%i' "$MODULE_CERT_DIR"
+                    return
+                fi ;;
+        esac
+    fi
+    if [ "$1" = -c ] && [ "$2" = '%u' ]; then echo 0
+    else command stat "$@"; fi
+}
 mount_in_current_namespace "$MODULE_CERT_DIR" || fail 'legacy mirror did not verify both paths'
 verify_cert_mount "$SYSTEM_SOURCE" compatible || fail 'primary store incomplete'
 verify_cert_mount "$SYSTEM_CERT_DIR" compatible || fail 'legacy store incomplete'
@@ -288,6 +303,10 @@ if mount_in_current_namespace "$MODULE_CERT_DIR"; then fail 'unexpected legacy r
 ok 'unexpected legacy CA rejects mirroring before touching APEX'
 mount() { echo "$*" >> "$TEST_ROOT/mounts"; return 1; }
 umount() { echo "$*" >> "$TEST_ROOT/unmounts"; return 0; }
+stat() {
+    if [ "$1" = -c ] && [ "$2" = '%u' ]; then echo 0
+    else command stat "$@"; fi
+}
 LEGACY_COMPAT=0
 
 # An APEX-capable builtin provider must supply the legacy overlay too.
