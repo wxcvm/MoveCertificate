@@ -15,8 +15,11 @@ init_paths() {
     SYSTEM_CERT_DIR=/system/etc/security/cacerts
     APEX_CERT_DIR=/apex/com.android.conscrypt/cacerts
     TEMP_DIR=/mnt/movecertificate
-    SYSTEM_SOURCE="$SYSTEM_CERT_DIR"
-    [ "$SDK" -lt 34 ] || SYSTEM_SOURCE="$APEX_CERT_DIR"
+    # Follow AOSP Conscrypt's Android 14+ default: prefer the updatable
+    # APEX CA directory only when it is present and nonempty. Otherwise the
+    # platform falls back to the system directory. A per-process Java
+    # system.certs.enabled override cannot be inferred from a root shell.
+    select_system_source
     CONFIGURED_MODE=compatible
     if [ -f "$MODDIR/mode.conf" ]; then
         value=$(sed -n 's/^[[:space:]]*mode[[:space:]]*=[[:space:]]*//p' "$MODDIR/mode.conf" | head -n1 | tr -d '\r' | sed 's/[[:space:]]*$//')
@@ -26,6 +29,14 @@ init_paths() {
     MODE_REASON=none
     CERT_OPENSSL=$(command -v openssl 2>/dev/null)
     return 0
+}
+
+select_system_source() {
+    SYSTEM_SOURCE="$SYSTEM_CERT_DIR"
+    if [ "$SDK" -ge 34 ] && [ -d "$APEX_CERT_DIR" ] &&
+       [ -n "$(ls -A "$APEX_CERT_DIR" 2>/dev/null)" ]; then
+        SYSTEM_SOURCE="$APEX_CERT_DIR"
+    fi
 }
 
 print_log() { printf '[MoveCertificate] %s\n' "$*" >> "$LOG_PATH"; }
