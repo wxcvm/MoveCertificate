@@ -21,7 +21,7 @@ setup() {
     MODDIR="$TEST_ROOT/case-$pass"
     mkdir -p "$MODDIR" "$MODDIR/native" "$MODDIR/user0" "$MODDIR/user10" "$MODDIR/custom"
     SYSTEM_SOURCE="$MODDIR/native"; MODULE_CERT_DIR="$MODDIR/state/certs"
-    SYSTEM_CERT_DIR="$MODDIR/legacy"; APEX_CERT_DIR="$MODDIR/apex/com.android.conscrypt/cacerts"
+    SYSTEM_CERT_DIR="$MODDIR/legacy"; APEX_CERT_DIR="$TEST_ROOT/apex-source/com.android.conscrypt/cacerts"
     LEGACY_TARGET=''; LEGACY_COMPAT=0
     MANIFEST="$MODDIR/state/certificate-sources.tsv"; LOG_PATH="$MODDIR/install.log"
     SELECTION_PATH="$MODDIR/cert-selection.tsv"
@@ -419,7 +419,7 @@ ok 'removed user/profile CA during staging aborts atomically and preserves last 
 # Opt-in legacy mirroring preserves every original native CA entry.
 setup
 SDK=37; SYSTEM_SOURCE="$APEX_CERT_DIR"; LEGACY_TARGET="$SYSTEM_CERT_DIR"; LEGACY_COMPAT=1
-mkdir -p "$APEX_CERT_DIR" "$MODDIR/apex/com.android.conscrypt" "$SYSTEM_CERT_DIR"
+mkdir -p "$APEX_CERT_DIR" "$SYSTEM_CERT_DIR"
 cp "$FIX/native.pem" "$APEX_CERT_DIR/$HASH.0"
 cp "$FIX/native.pem" "$SYSTEM_CERT_DIR/$HASH.0"
 cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
@@ -441,7 +441,7 @@ legacy_mount_setup() {
     setup
     SDK=37; CURRENT_MODE=compatible; SYSTEM_SOURCE="$APEX_CERT_DIR"
     LEGACY_TARGET="$SYSTEM_CERT_DIR"; LEGACY_COMPAT=1
-    mkdir -p "$APEX_CERT_DIR" "$MODDIR/apex/com.android.conscrypt" "$SYSTEM_CERT_DIR"
+    mkdir -p "$APEX_CERT_DIR" "$SYSTEM_CERT_DIR"
     cp "$FIX/native.pem" "$APEX_CERT_DIR/$HASH.0"
     cp "$FIX/native.pem" "$SYSTEM_CERT_DIR/$HASH.0"
     cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
@@ -463,7 +463,7 @@ ok 'legacy target is revalidated before its bind and earlier mounts are rolled b
 setup
 SDK=37; CURRENT_MODE=builtin; LEGACY_COMPAT=1
 SYSTEM_SOURCE="$APEX_CERT_DIR"; LEGACY_TARGET="$SYSTEM_CERT_DIR"
-mkdir -p "$APEX_CERT_DIR" "$MODDIR/apex/com.android.conscrypt" "$SYSTEM_CERT_DIR"
+mkdir -p "$APEX_CERT_DIR" "$SYSTEM_CERT_DIR"
 cp "$FIX/native.pem" "$APEX_CERT_DIR/$HASH.0"
 cp "$FIX/native.pem" "$SYSTEM_CERT_DIR/$HASH.0"
 cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
