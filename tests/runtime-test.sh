@@ -365,4 +365,53 @@ grep -q 'native certificate set changed during preparation' "$LOG_PATH" ||
     fail 'failed CA race replaced last good prepared store'
 ok 'new native CA during staging causes atomic failure without losing last state'
 
+# User CA contents must remain stable across the preparation window.
+setup
+prepare_cert_store || fail 'baseline before user-source mutation race'
+base64 -d "$FIX/collision.b64" > "$MODDIR/user0/$HASH.0"
+cp() {
+    command cp "$@" || return 1
+    if [ "$1" = -f ] && [ "$2" = "$MODDIR/user0/$HASH.0" ]; then
+        command cp "$FIX/native.pem" "$MODDIR/user0/$HASH.0" || return 1
+    fi
+}
+if prepare_cert_store; then fail 'user CA mutation during preparation accepted'; fi
+unset -f cp
+grep -q 'user certificate sources changed during preparation' "$LOG_PATH" || fail 'user mutation lacked an actionable diagnostic'
+[ ! -e "$MODULE_CERT_DIR/$HASH.1" ] || fail 'changed user CA replaced last good state'
+ok 'user CA replacement during staging aborts atomically and preserves last good state'
+
+# A newly added user/profile CA during staging must not enter a partial snapshot.
+setup
+prepare_cert_store || fail 'baseline before user-source addition race'
+base64 -d "$FIX/collision.b64" > "$MODDIR/user0/$HASH.0"
+cp() {
+    command cp "$@" || return 1
+    if [ "$1" = -f ] && [ "$2" = "$MODDIR/user0/$HASH.0" ] && [ ! -e "$MODDIR/user10/$HASH.9" ]; then
+        base64 -d "$FIX/collision.b64" > "$MODDIR/user10/$HASH.9" || return 1
+    fi
+}
+if prepare_cert_store; then fail 'new user CA during preparation accepted'; fi
+unset -f cp
+grep -q 'user certificate sources changed during preparation' "$LOG_PATH" || fail 'user addition lacked an actionable diagnostic'
+[ ! -e "$MODULE_CERT_DIR/$HASH.1" ] || fail 'new user CA race replaced last good state'
+ok 'new user/profile CA during staging aborts atomically and preserves last good state'
+
+# Removing a source while another user CA is being staged must also abort.
+setup
+prepare_cert_store || fail 'baseline before user-source removal race'
+base64 -d "$FIX/collision.b64" > "$MODDIR/user0/$HASH.0"
+base64 -d "$FIX/collision.b64" > "$MODDIR/user10/$HASH.9"
+cp() {
+    command cp "$@" || return 1
+    if [ "$1" = -f ] && [ "$2" = "$MODDIR/user0/$HASH.0" ]; then
+        rm -f "$MODDIR/user10/$HASH.9" || return 1
+    fi
+}
+if prepare_cert_store; then fail 'removed user CA during preparation accepted'; fi
+unset -f cp
+grep -q 'user certificate sources changed during preparation' "$LOG_PATH" || fail 'user removal lacked an actionable diagnostic'
+[ ! -e "$MODULE_CERT_DIR/$HASH.1" ] || fail 'removed user CA race replaced last good state'
+ok 'removed user/profile CA during staging aborts atomically and preserves last good state'
+
 printf 'PASS: %s shell regression cases\n' "$pass"

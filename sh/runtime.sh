@@ -76,7 +76,36 @@ cert_to_der() {
     [ "$byte" = 30 ] && [ -s "$output" ]
 }
 
-file_digest() { sha256sum "$1" | cut -d' ' -f1; }
+file_digest() {
+    local output
+    output=$(sha256sum "$1") || return 1
+    printf '%s\n' "${output%% *}
+
+snapshot_user_sources() {
+    local output="$1" user_dir input name origin owner digest
+    : > "$output" || return 1
+    for user_dir in ${USER_CERT_DIRS:-/data/misc/user/*/cacerts-added} "$CUSTOM_CERT_DIR"; do
+        [ -d "$user_dir" ] || continue
+        origin=user
+        [ "$user_dir" != "$CUSTOM_CERT_DIR" ] || origin=custom
+        for input in "$user_dir"/*; do
+            [ -f "$input" ] && [ ! -L "$input" ] || continue
+            name=${input##*/}
+            if [ "$origin" = user ]; then
+                valid_cert_name "$name" || continue
+            else
+                printf '%s\n' "$name" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_.-]*$' || continue
+                owner=$(stat -c '%u' "$input" 2>/dev/null)
+                [ "$owner" = 0 ] || continue
+            fi
+            digest=$(file_digest "$input") || return 1
+            printf '%s\t%s\n' "$input" "$digest" >> "$output" || return 1
+        done
+    done
+    sort -o "$output" "$output" || return 1
+    return 0
+}"
+}
 
 validate_selections() {
     [ -f "$SELECTION_PATH" ] || return 0
@@ -131,6 +160,13 @@ prepare_cert_store() {
         return 1
     fi
     cp "$stage/index.tsv" "$stage/native.tsv" || { remove_stage "$stage"; return 1; }
+    # Snapshot eligible user/profile/custom inputs before reading them. This catches
+    # concurrent additions, removals and replacements before the store is published.
+    if ! snapshot_user_sources "$stage/user-sources.before"; then
+        print_log 'ERROR: cannot snapshot user certificate sources'
+        remove_stage "$stage"
+        return 1
+    fi
     # Validate native hash sequences before adding any files.
     for input in "$stage/certs"/*; do
         name=${input##*/}; hash=${name%.*}; index=${name##*.}
@@ -191,11 +227,14 @@ prepare_cert_store() {
             printf '%s\t%s\t%s\tpending\n' "$digest" "$target" "$input" >> "$stage/sources.tsv"
         done
     done
-    # Recheck every original file byte-for-byte before publishing the new set.
+    if ! set_cert_permissions "$stage/certs" "$SYSTEM_SOURCE"; then
+        remove_stage "$stage"; return 1
+    fi
+    # Recheck native bytes and names after all staging work, immediately before publication.
     while IFS= read -r name; do
         cmp -s "$SYSTEM_SOURCE/$name" "$stage/certs/$name" || { remove_stage "$stage"; return 1; }
     done < "$stage/system.txt"
-    # Checking copied files is insufficient if a new native CA appeared while
+    # Checking copied files is insufficient if the native CA set changed while
     # preparing user inputs. The selected trust-store set must stay identical.
     native_now=0
     for input in "$SYSTEM_SOURCE"/*; do
@@ -214,13 +253,20 @@ prepare_cert_store() {
         remove_stage "$stage"
         return 1
     fi
-    if ! set_cert_permissions "$stage/certs" "$SYSTEM_SOURCE"; then
-        remove_stage "$stage"; return 1
+    if ! snapshot_user_sources "$stage/user-sources.after"; then
+        print_log 'ERROR: cannot recheck user certificate sources'
+        remove_stage "$stage"
+        return 1
+    fi
+    if ! cmp -s "$stage/user-sources.before" "$stage/user-sources.after"; then
+        print_log 'ERROR: user certificate sources changed during preparation'
+        remove_stage "$stage"
+        return 1
     fi
     mv "$stage/sources.tsv" "$stage/certificate-sources.tsv" && \
         mv "$stage/system.txt" "$stage/system_certs.txt" && \
         chmod 600 "$stage/certificate-sources.tsv" "$stage/system_certs.txt" || { remove_stage "$stage"; return 1; }
-    rm -f "$stage/current.der" "$stage/index.tsv" "$stage/native.tsv"
+    rm -f "$stage/current.der" "$stage/index.tsv" "$stage/native.tsv" "$stage/user-sources.before" "$stage/user-sources.after"
     if [ -d "$MODDIR/state" ]; then mv "$MODDIR/state" "$prior" || { remove_stage "$stage"; return 1; }; fi
     if ! mv "$stage" "$MODDIR/state"; then
         [ ! -d "$prior" ] || mv "$prior" "$MODDIR/state"
