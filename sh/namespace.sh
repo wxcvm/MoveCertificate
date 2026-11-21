@@ -7,6 +7,8 @@ expected=$3
 mode=$4
 expected_namespace=${5:-}
 source=${6:-}
+legacy_target=${7:-}
+case "$legacy_target" in ''|/*) ;; *) echo 'reason=invalid_legacy_target'; exit 1 ;; esac
 
 case "$action:$mode" in verify:builtin|verify:compatible|repair:builtin|repair:compatible) ;; *) exit 1 ;; esac
 case "$target" in /*) ;; *) exit 1 ;; esac
@@ -51,6 +53,10 @@ check_store() {
 }
 
 targets=$target
+# Verify and repair the legacy CA path independently for native TLS clients.
+if [ -n "$legacy_target" ] && [ "$legacy_target" != "$target" ]; then
+    targets="$targets $legacy_target"
+fi
 case "$target" in
     */com.android.conscrypt/cacerts)
         parent=${target%/com.android.conscrypt/cacerts}
