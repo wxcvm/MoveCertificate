@@ -79,7 +79,8 @@ cert_to_der() {
 file_digest() {
     local output
     output=$(sha256sum "$1") || return 1
-    printf '%s\n' "${output%% *}
+    printf '%s\n' "${output%% *}"
+}
 
 snapshot_user_sources() {
     local output="$1" user_dir input name origin owner digest
@@ -104,9 +105,7 @@ snapshot_user_sources() {
     done
     sort -o "$output" "$output" || return 1
     return 0
-}"
 }
-
 validate_selections() {
     [ -f "$SELECTION_PATH" ] || return 0
     [ ! -L "$SELECTION_PATH" ] || return 1
