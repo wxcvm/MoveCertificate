@@ -186,7 +186,7 @@ test('health diagnostic keeps nonzero status and stderr as actionable evidence',
 test('certificate subject lookup remains on-device without uploading certificate bytes', async () => {
     const { api, calls, networkCalls } = service({
         exec: cmd => cmd.startsWith('openssl x509 -in ')
-            ? { errno: 0, stderr: '', stdout: 'subject=CN=Private Test CA,O=Example\\n' } : null,
+            ? { errno: 0, stderr: '', stdout: 'subject=CN=Private Test CA,O=Example\n' } : null,
     });
     assert.equal(await api.getCertName('/data/misc/user/0/cacerts-added/12345678.0'), 'CN=Private Test CA,O=Example');
     assert.equal(networkCalls.length, 0);
