@@ -21,6 +21,8 @@ setup() {
     MODDIR="$TEST_ROOT/case-$pass"
     mkdir -p "$MODDIR" "$MODDIR/native" "$MODDIR/user0" "$MODDIR/user10" "$MODDIR/custom"
     SYSTEM_SOURCE="$MODDIR/native"; MODULE_CERT_DIR="$MODDIR/state/certs"
+    SYSTEM_CERT_DIR="$MODDIR/legacy"; APEX_CERT_DIR="$MODDIR/apex/com.android.conscrypt/cacerts"
+    LEGACY_TARGET=''; LEGACY_COMPAT=0
     MANIFEST="$MODDIR/state/certificate-sources.tsv"; LOG_PATH="$MODDIR/install.log"
     SELECTION_PATH="$MODDIR/cert-selection.tsv"
     CUSTOM_CERT_DIR="$MODDIR/custom"; USER_CERT_DIRS="$MODDIR/user0 $MODDIR/user10"
@@ -413,5 +415,98 @@ unset -f cp
 grep -q 'user certificate sources changed during preparation' "$LOG_PATH" || fail 'user removal lacked an actionable diagnostic'
 [ ! -e "$MODULE_CERT_DIR/$HASH.1" ] || fail 'removed user CA race replaced last good state'
 ok 'removed user/profile CA during staging aborts atomically and preserves last good state'
+
+# Opt-in legacy mirroring preserves every original native CA entry.
+setup
+SDK=37; SYSTEM_SOURCE="$APEX_CERT_DIR"; LEGACY_TARGET="$SYSTEM_CERT_DIR"; LEGACY_COMPAT=1
+mkdir -p "$APEX_CERT_DIR" "$MODDIR/apex/com.android.conscrypt" "$SYSTEM_CERT_DIR"
+cp "$FIX/native.pem" "$APEX_CERT_DIR/$HASH.0"
+cp "$FIX/native.pem" "$SYSTEM_CERT_DIR/$HASH.0"
+cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+prepare_cert_store || fail 'legacy source preparation'
+validate_legacy_native_store || fail 'matching legacy native CA rejected'
+cp "$FIX/collision.pem" "$SYSTEM_CERT_DIR/$HASH.9"
+if validate_legacy_native_store; then fail 'extra legacy native CA was hidden'; fi
+rm -f "$SYSTEM_CERT_DIR/$HASH.9"
+cp "$FIX/collision.pem" "$SYSTEM_CERT_DIR/$HASH.0"
+if validate_legacy_native_store; then fail 'divergent legacy native CA was hidden'; fi
+cp "$FIX/native.pem" "$SYSTEM_CERT_DIR/$HASH.0"
+printf hidden > "$SYSTEM_CERT_DIR/.unexpected"
+if validate_legacy_native_store; then fail 'hidden legacy entry was ignored'; fi
+rm -f "$SYSTEM_CERT_DIR/.unexpected"
+ok 'legacy preflight rejects extra, changed and hidden native entries'
+
+# Recheck the legacy directory immediately before binding it; roll back an earlier APEX bind on drift.
+legacy_mount_setup() {
+    setup
+    SDK=37; CURRENT_MODE=compatible; SYSTEM_SOURCE="$APEX_CERT_DIR"
+    LEGACY_TARGET="$SYSTEM_CERT_DIR"; LEGACY_COMPAT=1
+    mkdir -p "$APEX_CERT_DIR" "$MODDIR/apex/com.android.conscrypt" "$SYSTEM_CERT_DIR"
+    cp "$FIX/native.pem" "$APEX_CERT_DIR/$HASH.0"
+    cp "$FIX/native.pem" "$SYSTEM_CERT_DIR/$HASH.0"
+    cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+    prepare_cert_store || fail 'legacy mount source preparation'
+}
+legacy_mount_setup
+mount() {
+    command cp -p "$3"/* "$4/" || return 1
+    if [ "$4" = "$SYSTEM_SOURCE" ]; then command cp "$FIX/collision.pem" "$SYSTEM_CERT_DIR/$HASH.9" || return 1; fi
+    printf '%s\n' "$4" >> "$MODDIR/mounts"
+}
+umount() { printf '%s\n' "$1" >> "$MODDIR/unmounts"; }
+if mount_in_current_namespace "$MODULE_CERT_DIR"; then fail 'legacy drift between binds was accepted'; fi
+[ "$(wc -l < "$MODDIR/mounts")" -eq 1 ] || fail 'legacy target was mounted after drift'
+[ "$(wc -l < "$MODDIR/unmounts")" -eq 1 ] || fail 'primary APEX bind was not rolled back'
+ok 'legacy target is revalidated before its bind and earlier mounts are rolled back'
+
+# Builtin mode emits the legacy overlay only when the explicit flag is enabled.
+setup
+SDK=37; CURRENT_MODE=builtin; LEGACY_COMPAT=1
+SYSTEM_SOURCE="$APEX_CERT_DIR"; LEGACY_TARGET="$SYSTEM_CERT_DIR"
+mkdir -p "$APEX_CERT_DIR" "$MODDIR/apex/com.android.conscrypt" "$SYSTEM_CERT_DIR"
+cp "$FIX/native.pem" "$APEX_CERT_DIR/$HASH.0"
+cp "$FIX/native.pem" "$SYSTEM_CERT_DIR/$HASH.0"
+cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+prepare_cert_store && prepare_builtin || fail 'builtin legacy preparation'
+verify_cert_mount "$MODDIR/apex/com.android.conscrypt/cacerts" builtin || fail 'builtin APEX overlay incomplete'
+verify_cert_mount "$MODDIR/system/apex/com.android.conscrypt/cacerts" builtin || fail 'builtin system APEX overlay incomplete'
+verify_cert_mount "$MODDIR/system/etc/security/cacerts" builtin || fail 'builtin legacy overlay incomplete'
+ok 'builtin mode prepares APEX and legacy overlays only for explicit opt-in'
+
+# Default-off builtin mode must not create a legacy overlay.
+setup
+SDK=37; CURRENT_MODE=builtin; LEGACY_COMPAT=0
+SYSTEM_SOURCE="$APEX_CERT_DIR"
+mkdir -p "$APEX_CERT_DIR" "$MODDIR/apex/com.android.conscrypt"
+cp "$FIX/native.pem" "$APEX_CERT_DIR/$HASH.0"
+prepare_cert_store && prepare_builtin || fail 'default builtin preparation'
+[ ! -d "$MODDIR/system/etc/security/cacerts" ] || fail 'default-off created legacy overlay'
+ok 'legacy overlay remains absent by default'
+
+# The boot snapshot must not change if the config file is edited after preparation.
+(
+    MODDIR="$TEST_ROOT/legacy-snapshot"; mkdir -p "$MODDIR"
+    getprop() { echo 37; }
+    select_system_source() { SYSTEM_SOURCE="$APEX_CERT_DIR"; }
+    printf 'legacy_compat=1\n' > "$MODDIR/legacy-ca.conf"
+    init_paths || exit 1
+    [ "$LEGACY_COMPAT" = 1 ] || exit 1
+    write_runtime prepared || exit 1
+    printf 'legacy_compat=0\n' > "$MODDIR/legacy-ca.conf"
+    init_paths || exit 1
+    [ "$LEGACY_COMPAT" = 0 ] || exit 1
+    load_runtime_mode || exit 1
+    [ "$LEGACY_COMPAT" = 1 ] && [ "$LEGACY_TARGET" = "$SYSTEM_CERT_DIR" ]
+) || fail 'legacy boot snapshot changed after config edit'
+ok 'legacy opt-in is immutable for the current boot'
+(
+    MODDIR="$TEST_ROOT/legacy-fallback"; mkdir -p "$MODDIR"
+    getprop() { echo 37; }
+    select_system_source() { SYSTEM_SOURCE="$SYSTEM_CERT_DIR"; }
+    printf 'legacy_compat=1\n' > "$MODDIR/legacy-ca.conf"
+    init_paths || exit 1
+    [ "$LEGACY_COMPAT" = 0 ] && [ -z "$LEGACY_TARGET" ]
+) || fail 'legacy mirror activated when AOSP selected system fallback'
+ok 'legacy mirror stays off when the official system store is already primary'
 
 printf 'PASS: %s shell regression cases\n' "$pass"
