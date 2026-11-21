@@ -127,4 +127,19 @@ ok 'init failure prevents all child repair attempts'
 if verify_processes; then fail 'child failure ignored'; fi
 [ "$(grep -c '^30$' "$WORK/visited")" -eq 3 ] || fail 'failure did not receive bounded retries'
 ok 'persistent child failures remain failed after three bounded snapshots'
+
+# Legacy mirror validation must not silently accept a correct APEX store
+# when the old native TLS directory is incomplete.
+mkdir -p "$WORK/legacy"
+cp "$WORK/native"/* "$WORK/legacy/"
+sh -c "$script" fixture verify "$WORK/target" "$manifest" compatible '' '' "$WORK/legacy" ||
+    fail 'matching legacy target rejected'
+rm "$WORK/legacy/12345678.1"
+if sh -c "$script" fixture verify "$WORK/target" "$manifest" compatible '' '' "$WORK/legacy" > "$WORK/detail"; then
+    fail 'missing legacy CA was ignored'
+fi
+grep -q 'reason=certificate_missing' "$WORK/detail" || fail 'legacy failure lacked file evidence'
+cp "$WORK/native/12345678.1" "$WORK/legacy/"
+ok 'namespace verifier checks APEX and legacy stores independently'
+
 printf 'PASS: %s namespace regression cases\n' "$pass"
