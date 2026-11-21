@@ -19,6 +19,8 @@ export interface RuntimeInfo {
     sdk: number;
     bootId: string;
     effectiveMode: RunMode | null;
+    /** CA directory selected by this boot's system-source snapshot, including trailing slash. */
+    systemSource: string | null;
     state: string;
     reason: string;
     modeReason: string;
