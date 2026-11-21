@@ -100,3 +100,25 @@ jobs:
           else
             echo 'SonarCloud Quality Gate detail API unavailable; see SonarCloud dashboard'
           fi
+          # Print genuine new-line and new-branch coverage separately, so
+          # missing branch instrumentation cannot hide behind an aggregate.
+          metrics=$(mktemp)
+          trap 'rm -f "$response" "$metrics"' EXIT
+          set -- --fail --silent --show-error --get \
+            --header "Authorization: Bearer $SONAR_TOKEN" \
+            --data-urlencode 'component=wxcvm_MoveCertificate' \
+            --data-urlencode 'metricKeys=new_coverage,new_line_coverage,new_branch_coverage,new_lines_to_cover,new_uncovered_lines,new_conditions_to_cover,new_uncovered_conditions'
+          if [ -n "${PR_NUMBER:-}" ]; then set -- "$@" --data-urlencode "pullRequest=$PR_NUMBER"; fi
+          if curl "$@" 'https://sonarcloud.io/api/measures/component' > "$metrics"; then
+            python3 - "$metrics" <<'PY'
+          import json
+          import sys
+          with open(sys.argv[1], encoding='utf-8') as handle:
+              data = json.load(handle)
+          for metric in data.get('component', {}).get('measures', []):
+              print('Coverage metric:', metric.get('metric'), 'value:',
+                    metric.get('value', 'n/a'))
+          PY
+          else
+            echo 'SonarCloud coverage metrics API unavailable'
+          fi
