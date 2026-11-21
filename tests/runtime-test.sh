@@ -342,4 +342,27 @@ grep -q 'reason=prepared_system_source_invalid' "$MODDIR/drift.out" ||
     fail 'unsafe source had no diagnostic reason'
 ok 'runtime snapshot refuses an unexpected source path'
 
+
+# A newly added native CA during preparation must not be silently omitted,
+# even though all entries from the original listing still compare byte-wise.
+setup
+prepare_cert_store || fail 'baseline before native CA race'
+cp() {
+    command cp "$@" || return 1
+    if [ "$1" = -p ] && [ "$2" = "$SYSTEM_SOURCE/$HASH.0" ] &&
+       [ ! -e "$SYSTEM_SOURCE/$HASH.1" ]; then
+        command cp "$FIX/collision.pem" "$SYSTEM_SOURCE/$HASH.1" || return 1
+    fi
+}
+if prepare_cert_store; then
+    fail 'native certificate added mid-preparation was not detected'
+fi
+unset -f cp
+grep -q 'native certificate set changed during preparation' "$LOG_PATH" ||
+    fail 'new native certificate had no actionable diagnostic'
+[ -f "$MODULE_CERT_DIR/$HASH.0" ] &&
+    [ ! -e "$MODULE_CERT_DIR/$HASH.1" ] ||
+    fail 'failed CA race replaced last good prepared store'
+ok 'new native CA during staging causes atomic failure without losing last state'
+
 printf 'PASS: %s shell regression cases\n' "$pass"
