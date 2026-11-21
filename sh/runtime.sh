@@ -97,7 +97,7 @@ certificate_enabled() {
 }
 
 prepare_cert_store() {
-    local stage input name hash digest target index prior rc owner origin user_dir original_count=0
+    local stage input name hash digest target index prior rc owner origin user_dir original_count=0 native_now=0
     validate_selections || { print_log 'ERROR: invalid certificate selections'; return 1; }
     prior="$MODDIR/.state.previous"
     if [ -d "$prior" ]; then
