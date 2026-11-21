@@ -24,6 +24,17 @@ init_paths() {
     fi
     CURRENT_MODE="$CONFIGURED_MODE"
     MODE_REASON=none
+    # Opt-in legacy mirror for native TLS stacks still scanning /system.
+    LEGACY_COMPAT=0
+    LEGACY_TARGET=''
+    if [ "$SDK" -ge 34 ] && [ -f "$MODDIR/legacy-ca.conf" ] &&
+       [ ! -L "$MODDIR/legacy-ca.conf" ]; then
+        value=$(sed -n 's/^legacy_compat=//p' "$MODDIR/legacy-ca.conf" | head -n1 | tr -d '\r')
+        if [ "$value" = 1 ]; then
+            LEGACY_COMPAT=1
+            LEGACY_TARGET="$SYSTEM_CERT_DIR"
+        fi
+    fi
     CERT_OPENSSL=$(command -v openssl 2>/dev/null)
     return 0
 }
@@ -33,8 +44,8 @@ print_log() { printf '[MoveCertificate] %s\n' "$*" >> "$LOG_PATH"; }
 write_runtime() {
     local state="$1" reason="${2:-none}"
     {
-        printf 'boot_id=%s\nconfigured_mode=%s\neffective_mode=%s\nmode_reason=%s\nstate=%s\nreason=%s\n' \
-            "$BOOT_ID" "$CONFIGURED_MODE" "$CURRENT_MODE" "$MODE_REASON" "$state" "$reason"
+        printf 'boot_id=%s\nconfigured_mode=%s\neffective_mode=%s\nmode_reason=%s\nlegacy_compat=%s\nstate=%s\nreason=%s\n' \
+            "$BOOT_ID" "$CONFIGURED_MODE" "$CURRENT_MODE" "$MODE_REASON" "${LEGACY_COMPAT:-0}" "$state" "$reason"
     } > "$RUNTIME.tmp" && chmod 600 "$RUNTIME.tmp" && mv -f "$RUNTIME.tmp" "$RUNTIME"
 }
 
@@ -314,6 +325,7 @@ ns_run() {
 report_system_store_paths() {
     local path file name count
     printf 'selected_system_store=%s\n' "$SYSTEM_SOURCE"
+    printf 'legacy_compat=%s\n' "${LEGACY_COMPAT:-0}"
     for path in "$SYSTEM_CERT_DIR" "$APEX_CERT_DIR"; do
         count=0
         if [ -d "$path" ]; then
@@ -342,6 +354,33 @@ prepare_mount_source() {
     }
 }
 
+# Before mirroring, require that every original legacy CA survives with the
+# same name and bytes. Never conceal ROM-specific trust anchors.
+validate_legacy_native_store() {
+    local file name count=0
+    [ "$SDK" -ge 34 ] && [ -d "$SYSTEM_CERT_DIR" ] &&
+        [ -d "$MODULE_CERT_DIR" ] || {
+        print_log 'ERROR: legacy CA directory or prepared store unavailable'
+        return 1
+    }
+    for file in "$SYSTEM_CERT_DIR"/*; do
+        [ -e "$file" ] || [ -L "$file" ] || continue
+        name=${file##*/}
+        if [ ! -f "$file" ] || [ -L "$file" ] || ! valid_cert_name "$name" ||
+           [ ! -f "$MODULE_CERT_DIR/$name" ] ||
+           ! cmp -s "$file" "$MODULE_CERT_DIR/$name"; then
+            print_log "ERROR: refusing legacy mirror: original entry divergent: $name"
+            return 1
+        fi
+        count=$((count + 1))
+    done
+    [ "$count" -gt 0 ] || {
+        print_log 'ERROR: refusing legacy mirror: empty legacy CA directory'
+        return 1
+    }
+    return 0
+}
+
 # Unwind only binds created by this invocation, in reverse order.
 rollback_mount_targets() {
     local target
@@ -353,6 +392,12 @@ rollback_mount_targets() {
 mount_in_current_namespace() {
     local source="$1" target source_id target_id targets directory apex_identity apex_parent mounted=''
     targets="$SYSTEM_SOURCE"
+    # Do this before touching APEX: a divergent legacy directory must not
+    # leave a partial change to the primary trust store.
+    if [ "${LEGACY_COMPAT:-0}" = 1 ] && [ "$SDK" -ge 34 ]; then
+        validate_legacy_native_store || return 1
+        targets="$targets $SYSTEM_CERT_DIR"
+    fi
     if [ "$SDK" -ge 34 ] && [ "$SYSTEM_SOURCE" = "$APEX_CERT_DIR" ]; then
         apex_parent=${APEX_CERT_DIR%/com.android.conscrypt/cacerts}
         apex_identity=$(stat -L -c '%d:%i' "$apex_parent/com.android.conscrypt") || return 1
@@ -384,12 +429,15 @@ mount_in_current_namespace() {
 
 prepare_builtin() {
     local destination file destinations directory apex_identity apex_parent
+    [ "${LEGACY_COMPAT:-0}" != 1 ] || validate_legacy_native_store || return 1
     clean_builtin_outputs || return 1
     destinations="$MODDIR/system/etc/security/cacerts"
     if [ "$SDK" -ge 34 ]; then
         # Mountify and other partition-aware providers collect system/apex.
         # Keep root/apex as well for providers that explicitly support it.
         destinations="$MODDIR/apex/com.android.conscrypt/cacerts $MODDIR/system/apex/com.android.conscrypt/cacerts"
+        [ "${LEGACY_COMPAT:-0}" != 1 ] ||
+            destinations="$destinations $MODDIR/system/etc/security/cacerts"
         apex_parent=${APEX_CERT_DIR%/com.android.conscrypt/cacerts}
         apex_identity=$(stat -L -c '%d:%i' "$apex_parent/com.android.conscrypt") || return 1
         for directory in "$apex_parent"/com.android.conscrypt@*; do
@@ -483,7 +531,7 @@ namespace_store_manifest() {
 check_process_namespace() {
     local pid="$1" namespace="$2" output
     output=$(ns_run "$pid" /system/bin/sh -c "$namespace_script" namespace-check \
-        verify "$SYSTEM_SOURCE" "$expected_namespace_store" "$CURRENT_MODE" "$namespace" 2>&1)
+        verify "$SYSTEM_SOURCE" "$expected_namespace_store" "$CURRENT_MODE" "$namespace" '' "${LEGACY_TARGET:-}" 2>&1)
     if [ "$?" -eq 0 ]; then return 0; fi
     printf '%s\n' "$output"
     # A correct store needs no bind or dependency on the module directory in
@@ -495,13 +543,13 @@ check_process_namespace() {
         [ "$CURRENT_MODE" = compatible ] || return 1
         ns_run 1 /system/bin/sh "$MODDIR/sh/mount.sh" || return 1
         ns_run 1 /system/bin/sh -c "$namespace_script" namespace-check \
-            verify "$SYSTEM_SOURCE" "$expected_namespace_store" compatible "$namespace"
+            verify "$SYSTEM_SOURCE" "$expected_namespace_store" compatible "$namespace" '' "${LEGACY_TARGET:-}"
         return $?
     fi
     # Propagate only init's already validated store into a missing child view.
     # The standalone helper revalidates it without reopening module files.
     ns_run "$pid" /system/bin/sh -c "$namespace_script" namespace-repair \
-        repair "$SYSTEM_SOURCE" "$expected_namespace_store" "$CURRENT_MODE" "$namespace" "/proc/1/root$SYSTEM_SOURCE"
+        repair "$SYSTEM_SOURCE" "$expected_namespace_store" "$CURRENT_MODE" "$namespace" "/proc/1/root$SYSTEM_SOURCE" "${LEGACY_TARGET:-}"
 }
 
 process_name() {
@@ -517,6 +565,13 @@ load_runtime_mode() {
     CONFIGURED_MODE=$(sed -n 's/^configured_mode=//p' "$RUNTIME")
     MODE_REASON=$(sed -n 's/^mode_reason=//p' "$RUNTIME")
     case "$CURRENT_MODE" in compatible|builtin) ;; *) return 1 ;; esac
+    # Boot snapshot: toggling the config file does not affect live processes.
+    LEGACY_COMPAT=$(sed -n 's/^legacy_compat=//p' "$RUNTIME" | head -n1)
+    case "$LEGACY_COMPAT" in
+        1) [ "$SDK" -ge 34 ] || return 1; LEGACY_TARGET="$SYSTEM_CERT_DIR" ;;
+        0|'') LEGACY_COMPAT=0; LEGACY_TARGET='' ;;
+        *) return 1 ;;
+    esac
 }
 
 lock_state() {
