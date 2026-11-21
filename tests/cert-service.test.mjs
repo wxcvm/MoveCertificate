@@ -12,7 +12,7 @@ const row = (id = fingerprint, user = 0, state = 'pending') => `${id}\t12345678.
 function service(options = {}) {
     const calls = [];
     const files = {
-        'runtime.conf': `boot_id=boot\neffective_mode=compatible\nstate=${options.state ?? 'ready'}\nreason=none`,
+        'runtime.conf': `boot_id=boot\neffective_mode=compatible\nsystem_source=${options.source ?? (options.sdk && options.sdk < 34 ? '/system/etc/security/cacerts' : '/apex/com.android.conscrypt/cacerts')}\nstate=${options.state ?? 'ready'}\nreason=none`,
         'state/boot_id': 'boot', 'certificate-sources.tsv': options.manifest ?? row(),
         'cert_names.json': JSON.stringify({ [fingerprint]: 'Test CA', [other]: 'Other CA' }),
         'mode.conf': options.mode ?? 'mode=compatible', 'cert-selection.tsv': options.selections ?? '', ...options.files,
@@ -127,4 +127,30 @@ test('selection writes use a dedicated helper and verify saved preferences', asy
 test('failed selection writes do not report success', async () => {
     const { api } = service({ exec: c => c.includes('set-cert-enabled.sh') ? { errno: 1, stderr: 'write failed', stdout: '' } : null });
     await assert.rejects(api.setCertEnabled(fingerprint, false), /write failed/);
+});
+
+test('Android 14+ runtime system fallback chooses the legacy path instead of SDK-based APEX', async () => {
+    const { api, calls } = service({ sdk: 37, source: '/system/etc/security/cacerts' });
+    const runtime = await api.getRuntimeInfo();
+    assert.equal(runtime.systemSource, '/system/etc/security/cacerts/');
+    assert.equal((await api.getInstallCertResults())[0].status, 'success');
+    assert.ok(calls.some(c => c.includes('cmp -s') && c.includes('/system/etc/security/cacerts/12345678.1')));
+    assert.ok(!calls.some(c => c.includes('cmp -s') && c.includes('/apex/com.android.conscrypt/cacerts/12345678.1')));
+});
+test('untrusted or absent runtime source never produces green or guessed red statuses', async () => {
+    for (const source of ['', '/system/etc/security/not-the-system-store']) {
+        const { api, calls } = service({ source });
+        const runtime = await api.getRuntimeInfo();
+        assert.equal(runtime.systemSource, null);
+        assert.equal((await api.getInstallCertResults())[0].status, 'unknown');
+        assert.ok(!calls.some(c => c.includes('cmp -s')));
+    }
+});
+test('stale boot snapshot never selects a system CA verification path', async () => {
+    const { api, calls } = service({
+        files: { 'runtime.conf': 'boot_id=old\neffective_mode=compatible\nsystem_source=/apex/com.android.conscrypt/cacerts\nstate=ready' },
+    });
+    assert.equal((await api.getRuntimeInfo()).systemSource, null);
+    assert.equal((await api.getInstallCertResults())[0].status, 'unknown');
+    assert.ok(!calls.some(c => c.includes('cmp -s')));
 });
