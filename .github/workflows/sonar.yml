@@ -43,3 +43,43 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Explain Quality Gate failure
+        if: failure()
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -eu
+          if [ -z "${SONAR_TOKEN:-}" ]; then
+            echo 'SonarCloud diagnostics unavailable: SONAR_TOKEN is unset'
+            exit 0
+          fi
+          response=$(mktemp)
+          trap 'rm -f "$response"' EXIT
+          set -- --fail --silent --show-error --get \
+            --header "Authorization: Bearer $SONAR_TOKEN" \
+            --data-urlencode 'projectKey=wxcvm_MoveCertificate'
+          if [ -n "${PR_NUMBER:-}" ]; then
+            case "$PR_NUMBER" in
+              *[!0-9]*) echo 'Unexpected pull-request number'; exit 0 ;;
+            esac
+            set -- "$@" --data-urlencode "pullRequest=$PR_NUMBER"
+          fi
+          if curl "$@" 'https://sonarcloud.io/api/qualitygates/project_status' > "$response"; then
+            python3 - "$response" <<'PY'
+          import json
+          import sys
+          with open(sys.argv[1], encoding='utf-8') as handle:
+              report = json.load(handle).get('projectStatus', {})
+          print('SonarCloud Quality Gate:', report.get('status', 'unavailable'))
+          for condition in report.get('conditions', []):
+              if condition.get('status') != 'OK':
+                  print('Failed metric:', condition.get('metricKey'),
+                        'status:', condition.get('status'),
+                        'actual:', condition.get('actualValue', 'n/a'),
+                        'threshold:', condition.get('errorThreshold', 'n/a'))
+          PY
+          else
+            echo 'SonarCloud Quality Gate detail API unavailable; see SonarCloud dashboard'
+          fi
