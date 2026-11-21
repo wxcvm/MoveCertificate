@@ -397,7 +397,7 @@ prepare_builtin() {
     local destination file destinations directory apex_identity apex_parent
     clean_builtin_outputs || return 1
     destinations="$MODDIR/system/etc/security/cacerts"
-    if [ "$SDK" -ge 34 ]; then
+    if [ "$SDK" -ge 34 ] && [ "$SYSTEM_SOURCE" = "$APEX_CERT_DIR" ]; then
         # Mountify and other partition-aware providers collect system/apex.
         # Keep root/apex as well for providers that explicitly support it.
         destinations="$MODDIR/apex/com.android.conscrypt/cacerts $MODDIR/system/apex/com.android.conscrypt/cacerts"
