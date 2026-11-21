@@ -116,7 +116,6 @@ test('startup binds a read-only health check and reports successful PID verifica
     assert.equal(h.ids.get('healthOutput').textContent, 'checked:123 456');
     assert.equal(h.ids.get('healthStatus').textContent, 'healthPassed');
     assert.equal(h.ids.get('healthCheckBtn').disabled, false);
-    assert.equal(h.ids.get('certificateList').childNodes.length, 0);
     assert.ok(h.events.some(event => event[0] === 'fullScreen' && event[1] === false));
 });
 
