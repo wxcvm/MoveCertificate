@@ -130,6 +130,8 @@ ok 'persistent child failures remain failed after three bounded snapshots'
 
 # Legacy mirror validation must not silently accept a correct APEX store
 # when the old native TLS directory is incomplete.
+# Earlier rollback tests intentionally left the primary fixture incomplete.
+cp "$WORK/native/12345678.1" "$WORK/target/"
 mkdir -p "$WORK/legacy"
 cp "$WORK/native"/* "$WORK/legacy/"
 sh -c "$script" fixture verify "$WORK/target" "$manifest" compatible '' '' "$WORK/legacy" ||
