@@ -5,6 +5,26 @@
 A `Magisk/KernelSU/APatch` module for adding user CAs to the system trust store on `Android 7-17`. This repository maintains only the certificate module and WebUI. Android 14+ normally uses the active Conscrypt APEX store. Builtin mode needs an APEX-capable mount provider and verifies init and zygote views after boot. See [FIXES.md](FIXES.md) for validation limits.
 If your phone has an official image, you might need this module. If you compile your own ROM, you can either build it in or manually move it using `remount`.
 
+## Optional: Android 14+ legacy CA compatibility for native TLS (experimental)
+
+Some third-party native TLS stacks may still scan `/system/etc/security/cacerts`, while Android 14+ Conscrypt normally uses the active APEX CA store. MoveCertificate keeps the AOSP-selected store as its primary source; this optional mirror is disabled by default and only adds the validated store to the legacy path after explicit opt-in.
+
+Enable and perform a **full reboot**:
+
+```sh
+su -c "printf 'legacy_compat=1\n' > /data/adb/modules/MoveCertificate/legacy-ca.conf"
+```
+
+Disable and reboot again:
+
+```sh
+su -c 'rm -f /data/adb/modules/MoveCertificate/legacy-ca.conf'
+```
+
+If the legacy directory contains any original entry missing from or different than the validated store, including hidden files or symlinks, the module refuses to mirror it. Child-namespace repair performs the same preservation check.
+
+This is an experimental compatibility candidate for some native TLS implementations. It does not disable TLS verification and cannot guarantee that an app accepts intercepted HTTPS. A third-party CA may broaden system trust; enable only when needed and trusted. Static Bilibili analysis is supporting evidence, not proof; full device reproduction and rollback acceptance are still pending.
+
 # Usage
 
 - Prefer installing through system settings, no need to deal with encoding issues

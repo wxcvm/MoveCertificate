@@ -7,6 +7,8 @@ expected=$3
 mode=$4
 expected_namespace=${5:-}
 source=${6:-}
+legacy_target=${7:-}
+case "$legacy_target" in ''|/*) ;; *) echo 'reason=invalid_legacy_target'; exit 1 ;; esac
 
 case "$action:$mode" in verify:builtin|verify:compatible|repair:builtin|repair:compatible) ;; *) exit 1 ;; esac
 case "$target" in /*) ;; *) exit 1 ;; esac
@@ -50,7 +52,36 @@ check_store() {
     verified_directories="$verified_directories$directory_identity "
 }
 
+check_legacy_preservation() {
+    legacy_directory=$1
+    legacy_source=$2
+    legacy_count=0
+    [ -d "$legacy_directory" ] && [ ! -L "$legacy_directory" ] || {
+        echo "reason=legacy_directory_unavailable path=$legacy_directory"
+        return 1
+    }
+    for legacy_file in "$legacy_directory"/* "$legacy_directory"/.[!.]* "$legacy_directory"/..?*; do
+        [ -e "$legacy_file" ] || [ -L "$legacy_file" ] || continue
+        legacy_name=${legacy_file##*/}
+        if [ ! -f "$legacy_file" ] || [ -L "$legacy_file" ] ||
+           ! printf '%s\n' "$legacy_name" | grep -Eq '^[0-9a-f]{8}\.[0-9]+$' ||
+           [ ! -f "$legacy_source/$legacy_name" ] || [ -L "$legacy_source/$legacy_name" ] ||
+           ! cmp -s "$legacy_file" "$legacy_source/$legacy_name"; then
+            echo "reason=legacy_entry_divergent path=$legacy_directory name=$legacy_name"
+            return 1
+        fi
+        legacy_count=$((legacy_count + 1))
+    done
+    [ "$legacy_count" -gt 0 ] || {
+        echo "reason=legacy_store_empty path=$legacy_directory"
+        return 1
+    }
+    return 0
+}
 targets=$target
+if [ -n "$legacy_target" ] && [ "$legacy_target" != "$target" ]; then
+    targets="$targets $legacy_target"
+fi
 case "$target" in
     */com.android.conscrypt/cacerts)
         parent=${target%/com.android.conscrypt/cacerts}
@@ -70,6 +101,9 @@ fi
 # The caller only requests repair after verifying init. Check the source again
 # inside this namespace before any mount. Never synthesize or copy a CA store.
 check_store "$source" || { echo 'reason=repair_source_invalid'; exit 1; }
+if [ -n "$legacy_target" ] && [ "$legacy_target" != "$target" ]; then
+    check_legacy_preservation "$legacy_target" "$source" || exit 1
+fi
 source_identity=$(stat -L -c '%d:%i' "$source") || exit 1
 mounted=''
 rollback() {
@@ -79,6 +113,9 @@ rollback() {
 }
 for destination in $targets; do
     [ -d "$destination" ] || { rollback; echo "reason=directory_missing path=$destination"; exit 1; }
+    if [ -n "$legacy_target" ] && [ "$destination" = "$legacy_target" ]; then
+        check_legacy_preservation "$destination" "$source" || { rollback; exit 1; }
+    fi
     identity=$(stat -L -c '%d:%i' "$destination") || { rollback; exit 1; }
     if [ "$identity" != "$source_identity" ]; then
         mount -o bind "$source" "$destination" || { rollback; echo "reason=bind_failed path=$destination"; exit 1; }

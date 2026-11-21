@@ -5,5 +5,9 @@ init_paths && load_runtime_mode || exit 1
 if [ "$CURRENT_MODE" = compatible ]; then
     prepare_mount_source && mount_in_current_namespace "$TEMP_DIR"
 else
-    verify_cert_mount "$SYSTEM_SOURCE" builtin
+    if [ "${LEGACY_COMPAT:-0}" = 1 ]; then
+        mount_in_current_namespace "$MODULE_CERT_DIR"
+    else
+        verify_cert_mount "$SYSTEM_SOURCE" builtin
+    fi
 fi

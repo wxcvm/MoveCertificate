@@ -10,6 +10,26 @@ Android 14–17 可选择内置模式，KernelSU 需要能挂载 APEX 的元模�
 WebUI 可逐张选择用户证书是否迁移，取消挂载保留原证书、重启后生效；AdGuard 根证书默认开启，中间证书默认关闭。
 如果手机是官方镜像,可能就需要借助模块,如果是自己编译的直接内置或者`remount`手动移一下就行了.
 
+## 可选：Android 14+ 原生 TLS 旧目录兼容（实验性）
+
+部分第三方原生 TLS 库可能仍读取 `/system/etc/security/cacerts`，而 Android 14+ 的 Conscrypt 默认使用活动 APEX 证书库。MoveCertificate 仍以 AOSP 选出的活动目录为主；此兼容功能默认关闭，只在明确启用后将已验证的证书集合额外镜像到旧目录。
+
+启用后需要**完整重启**：
+
+```sh
+su -c "printf 'legacy_compat=1\n' > /data/adb/modules/MoveCertificate/legacy-ca.conf"
+```
+
+关闭并完整重启：
+
+```sh
+su -c 'rm -f /data/adb/modules/MoveCertificate/legacy-ca.conf'
+```
+
+如果旧目录含有 APEX/模块证书库中不存在、内容不同、隐藏或符号链接的原生条目，模块会拒绝镜像，避免隐藏原有信任锚。应用命名空间修复也执行同样的保留检查。
+
+这是针对部分原生 TLS 实现的兼容性候选，不会关闭 TLS 验证，也不保证应用接受 HTTPS 过滤。第三方 CA 可能扩大系统信任范围；只在确实需要且信任该 CA 时启用。Bilibili 静态分析仅提供候选依据，真机复现和回滚验收仍未完成。
+
 # 使用方法 
 
 - 优先使用系统设置安装, 不需要处理编码问题
