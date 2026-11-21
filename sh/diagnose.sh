@@ -10,7 +10,7 @@ init_paths && load_runtime_mode || exit 1
 }
 namespace_script=$(cat "$MODDIR/sh/namespace.sh") || exit 1
 expected_namespace_store=$(namespace_store_manifest) || exit 1
-printf 'MoveCertificate namespace diagnostic\nboot_id=%s sdk=%s mode=%s\n' "$BOOT_ID" "$SDK" "$CURRENT_MODE"
+printf 'MoveCertificate namespace diagnostic\nboot_id=%s sdk=%s mode=%s legacy_compat=%s\n' "$BOOT_ID" "$SDK" "$CURRENT_MODE" "${LEGACY_COMPAT:-0}"
 printf 'boot_state=%s uptime=%s\n' "$(sed -n 's/^state=//p' "$RUNTIME")" "$(cut -d' ' -f1 /proc/uptime)"
 # Report both candidate directories; a Java per-process property can still
 # select the legacy store, which a root shell cannot conclusively infer.
@@ -47,7 +47,7 @@ for pid in "$@"; do
     name=$(process_name "$pid")
     printf '\npid=%s name=%s namespace=%s\n' "$pid" "$name" "$namespace"
     ns_run "$pid" /system/bin/sh -c "$namespace_script" diagnostic \
-        verify "$SYSTEM_SOURCE" "$expected_namespace_store" "$CURRENT_MODE" "$namespace"
+        verify "$SYSTEM_SOURCE" "$expected_namespace_store" "$CURRENT_MODE" "$namespace" '' "${LEGACY_TARGET:-}"
     status=$?
     printf 'verification_status=%s\n' "$status"
     [ "$status" -eq 0 ] || result=1
