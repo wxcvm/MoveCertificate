@@ -133,7 +133,8 @@ cp "$WORK/native/12345678.0" "$WORK/legacy/"
 export OPS="$WORK/legacy-ops"
 : > "$OPS"
 legacy_prelude='mount() { echo "$4" >> "$OPS"; cp "$3"/* "$4/"; }; umount() { echo "$1" >> "$OPS"; }'
-sh -c "$legacy_prelude\n$script" fixture repair "$WORK/target" "$manifest" compatible '' "$WORK/native" "$WORK/legacy" || fail 'safe legacy subset repair'
+sh -c "$legacy_prelude
+$script" fixture repair "$WORK/target" "$manifest" compatible '' "$WORK/native" "$WORK/legacy" || fail 'safe legacy subset repair'
 sh -c "$script" fixture verify "$WORK/target" "$manifest" compatible '' '' "$WORK/legacy" || fail 'repaired legacy store'
 [ "$(wc -l < "$OPS")" -eq 2 ] || fail 'both APEX and legacy targets were not repaired'
 ok 'namespace repair fills a legacy store whose original entries are byte-identical'
@@ -143,7 +144,8 @@ rm -rf "$WORK/legacy"; mkdir -p "$WORK/legacy"
 cp "$WORK/native/12345678.0" "$WORK/legacy/"
 cp "$WORK/native/12345678.0" "$WORK/legacy/87654321.0"
 : > "$OPS"
-if sh -c "$legacy_prelude\n$script" fixture repair "$WORK/target" "$manifest" compatible '' "$WORK/native" "$WORK/legacy" > "$WORK/detail"; then fail 'extra legacy CA was hidden'; fi
+if sh -c "$legacy_prelude
+$script" fixture repair "$WORK/target" "$manifest" compatible '' "$WORK/native" "$WORK/legacy" > "$WORK/detail"; then fail 'extra legacy CA was hidden'; fi
 [ ! -s "$OPS" ] || fail 'legacy preservation failure mounted another target'
 grep -q 'reason=legacy_entry_divergent' "$WORK/detail" || fail 'extra legacy CA lacked a preservation diagnostic'
 ok 'namespace repair refuses an extra legacy trust anchor before any bind'
@@ -152,7 +154,8 @@ rm -rf "$WORK/legacy"; mkdir -p "$WORK/legacy"
 cp "$WORK/native/12345678.0" "$WORK/legacy/"
 printf changed >> "$WORK/legacy/12345678.0"
 : > "$OPS"
-if sh -c "$legacy_prelude\n$script" fixture repair "$WORK/target" "$manifest" compatible '' "$WORK/native" "$WORK/legacy" > "$WORK/detail"; then fail 'changed legacy CA was hidden'; fi
+if sh -c "$legacy_prelude
+$script" fixture repair "$WORK/target" "$manifest" compatible '' "$WORK/native" "$WORK/legacy" > "$WORK/detail"; then fail 'changed legacy CA was hidden'; fi
 [ ! -s "$OPS" ] || fail 'divergent legacy entry mounted another target'
 grep -q 'reason=legacy_entry_divergent' "$WORK/detail" || fail 'changed legacy CA lacked a preservation diagnostic'
 ok 'namespace repair refuses a same-name legacy CA with different bytes'
@@ -161,7 +164,8 @@ rm -rf "$WORK/legacy"; mkdir -p "$WORK/legacy"
 cp "$WORK/native/12345678.0" "$WORK/legacy/"
 printf hidden > "$WORK/legacy/.unexpected"
 : > "$OPS"
-if sh -c "$legacy_prelude\n$script" fixture repair "$WORK/target" "$manifest" compatible '' "$WORK/native" "$WORK/legacy" > "$WORK/detail"; then fail 'hidden legacy entry was ignored'; fi
+if sh -c "$legacy_prelude
+$script" fixture repair "$WORK/target" "$manifest" compatible '' "$WORK/native" "$WORK/legacy" > "$WORK/detail"; then fail 'hidden legacy entry was ignored'; fi
 [ ! -s "$OPS" ] || fail 'hidden legacy entry mounted another target'
 ok 'namespace repair detects hidden files in the legacy trust directory'
 
