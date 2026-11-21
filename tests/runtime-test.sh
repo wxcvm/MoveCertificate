@@ -453,7 +453,7 @@ cp "$FIX/collision.pem" "$MODULE_CERT_DIR/22222222.0"
 validate_legacy_native_store || fail 'two APEX-only CAs unexpectedly rejected'
 mount() {
     command cp -p "$3"/* "$4/" || return 1
-    printf '%s\\n' "$4" >> "$MODDIR/mounts"
+    printf '%s\n' "$4" >> "$MODDIR/mounts"
 }
 LEGACY_COMPAT=0; LEGACY_TARGET=''
 mount_in_current_namespace "$MODULE_CERT_DIR" || fail 'default APEX-only bind failed'
