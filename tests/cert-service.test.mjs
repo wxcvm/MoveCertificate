@@ -11,6 +11,7 @@ const other = 'b'.repeat(64);
 const row = (id = fingerprint, user = 0, state = 'pending') => `${id}\t12345678.1\t/data/misc/user/${user}/cacerts-added/12345678.0\t${state}`;
 function service(options = {}) {
     const calls = [];
+    const networkCalls = [];
     const files = {
         'runtime.conf': `boot_id=boot\neffective_mode=compatible\nsystem_source=${options.source ?? (options.sdk && options.sdk < 34 ? '/system/etc/security/cacerts' : '/apex/com.android.conscrypt/cacerts')}\nstate=${options.state ?? 'ready'}\nreason=none`,
         'state/boot_id': 'boot', 'certificate-sources.tsv': options.manifest ?? row(),
@@ -32,12 +33,12 @@ function service(options = {}) {
             else if (command.includes('set-mode.sh')) files['mode.conf'] = "mode=" + (command.endsWith("'builtin'") ? 'builtin' : 'compatible');
             else if (command.includes('set-cert-enabled.sh')) files['cert-selection.tsv'] = fingerprint + '\t' + (command.endsWith('1') ? '1' : '0');
             return result;
-        }, fetch: async () => ({ ok: true, json: async () => ({ result: 'Test CA' }) }),
+        }, fetch: async (...args) => { networkCalls.push(args); throw new Error('certificate lookup must be offline'); },
     });
     const code = stripTypeScriptTypes(constants.replaceAll('export ', '') + '\n' + source
         .replace(/^import .*?;\s*/gms, '').replaceAll('export ', ''));
-    vm.runInContext(code + '\nthis.api={getInstallCertResults,getRuntimeInfo,getCurrentMode,setMode,deleteCert,readFileBase64,getVersionInfo,setCertEnabled,getHealthDiagnostic};', context);
-    return { api: context.api, calls };
+    vm.runInContext(code + '\nthis.api={getInstallCertResults,getRuntimeInfo,getCurrentMode,setMode,deleteCert,readFileBase64,getVersionInfo,setCertEnabled,getHealthDiagnostic,getCertName};', context);
+    return { api: context.api, calls, networkCalls };
 }
 test('all user sources deduplicate by fingerprint, not subject filename', async () => {
     const { api } = service({ manifest: [row(), row(fingerprint, 10), row(other, 11)].join('\n') });
@@ -180,4 +181,34 @@ test('health diagnostic keeps nonzero status and stderr as actionable evidence',
     const result = await api.getHealthDiagnostic('');
     assert.equal(result.status, 2);
     assert.equal(result.output, 'source_check_status=2\nreason=manifest_missing');
+});
+
+test('certificate subject lookup remains on-device without uploading certificate bytes', async () => {
+    const { api, calls, networkCalls } = service({
+        exec: cmd => cmd.startsWith('openssl x509 -in ')
+            ? { errno: 0, stderr: '', stdout: 'subject=CN=Private Test CA,O=Example\\n' } : null,
+    });
+    assert.equal(await api.getCertName('/data/misc/user/0/cacerts-added/12345678.0'), 'CN=Private Test CA,O=Example');
+    assert.equal(networkCalls.length, 0);
+    assert.ok(calls.some(cmd => cmd.startsWith('openssl x509 -in ')));
+    assert.ok(!calls.some(cmd => cmd.includes('curl ') || cmd.includes('https://')));
+});
+test('DER certificate subject is handled locally when the PEM parse fails', async () => {
+    const { api, calls, networkCalls } = service({
+        exec: cmd => cmd.startsWith('openssl x509 -in ')
+            ? { errno: 1, stdout: '', stderr: '' }
+            : cmd.startsWith('openssl x509 -inform DER ')
+                ? { errno: 0, stdout: 'subject=CN=DER CA', stderr: '' } : null,
+    });
+    assert.equal(await api.getCertName('/data/local/tmp/cert/example.der'), 'CN=DER CA');
+    assert.ok(calls.some(cmd => cmd.startsWith('openssl x509 -inform DER ')));
+    assert.equal(networkCalls.length, 0);
+});
+test('unavailable local X509 parser never falls back to a remote certificate service', async () => {
+    const { api, networkCalls } = service({
+        exec: cmd => cmd.startsWith('openssl x509 ')
+            ? { errno: 127, stdout: '', stderr: 'openssl: not found' } : null,
+    });
+    assert.equal(await api.getCertName('/data/local/tmp/cert/example.pem'), 'Unknown');
+    assert.equal(networkCalls.length, 0);
 });
