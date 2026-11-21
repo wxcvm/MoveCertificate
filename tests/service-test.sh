@@ -12,6 +12,8 @@ cat >> "$WORK/module/sh/runtime.sh" <<'MOCK'
 init_paths() {
     BOOT_ID=fixture-boot; CURRENT_MODE=builtin; CONFIGURED_MODE=builtin; MODE_REASON=none
     RUNTIME="$MODDIR/runtime.conf"; LOG_PATH="$MODDIR/install.log"; TEMP_DIR="$MODDIR/mounted"
+    SYSTEM_CERT_DIR=/system/etc/security/cacerts; APEX_CERT_DIR=/apex/com.android.conscrypt/cacerts
+    SYSTEM_SOURCE="$SYSTEM_CERT_DIR"
 }
 getprop() { echo 1; }
 lock_state() { :; }
@@ -26,7 +28,7 @@ pass=0
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok() { pass=$((pass + 1)); printf 'ok %s - %s\n' "$pass" "$1"; }
 setup() {
-    printf 'boot_id=fixture-boot\nconfigured_mode=%s\neffective_mode=%s\nmode_reason=none\nstate=%s\nreason=%s\n' "${3:-builtin}" "${3:-builtin}" "$1" "$2" > "$WORK/module/runtime.conf"
+    printf 'boot_id=fixture-boot\nconfigured_mode=%s\neffective_mode=%s\nmode_reason=none\nsystem_source=/system/etc/security/cacerts\nstate=%s\nreason=%s\n' "${3:-builtin}" "${3:-builtin}" "$1" "$2" > "$WORK/module/runtime.conf"
     printf 'fixture-boot\n' > "$WORK/module/state/boot_id"
     rm -f "$WORK/module/verified" "$WORK/module/reject" "$WORK/module/activated" "$WORK/module/source-attempt" "$WORK/module/source-ready" "$WORK/module/mounted-ok"
 }
