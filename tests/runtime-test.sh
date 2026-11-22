@@ -36,6 +36,19 @@ cmp -s "$SYSTEM_SOURCE/$HASH.0" "$MODULE_CERT_DIR/$HASH.0" || fail 'native overw
 [ "$(wc -l < "$MANIFEST")" -eq 2 ] || fail 'multi-user provenance'
 grep -q 'BEGIN CERTIFICATE' "$MODULE_CERT_DIR/$HASH.1" || fail 'PEM output required'
 ok 'colliding CA preserves native bytes; PEM/DER duplicates and all users recorded'
+# The production default is owner user 0; explicit fixture overrides exercise
+# the same source scope for preparation, snapshot and read-only diagnostics.
+[ "$(grep -Fc 'USER_CERT_DIRS:-/data/misc/user/0/cacerts-added' "$ROOT/sh/runtime.sh")" -eq 3 ] || fail 'source scope defaults differ across code paths'
+setup
+USER_CERT_DIRS="$MODDIR/user0"
+cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+cp "$FIX/collision.pem" "$MODDIR/user10/$HASH.0"
+prepare_cert_store || fail 'owner-only preparation'
+[ "$(wc -l < "$MANIFEST")" -eq 1 ] || fail 'secondary user was imported into owner-only trust store'
+case "$(cat "$MANIFEST")" in *"$MODDIR/user10/"*) fail 'secondary user CA leaked into manifest' ;; esac
+printf '\\nchanged' >> "$MODDIR/user10/$HASH.0"
+check_certificate_sources >/dev/null || fail 'excluded secondary user changed owner-only diagnostic'
+ok 'owner-only source scope excludes secondary users from import and diagnostics'
 rm "$MODDIR/user0/$HASH.0" "$MODDIR/user10/$HASH.9"
 prepare_cert_store || fail 'fresh preparation'
 [ ! -e "$MODULE_CERT_DIR/$HASH.1" ] || fail 'removed input resurrected'
