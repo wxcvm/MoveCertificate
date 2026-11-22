@@ -46,9 +46,16 @@ cp "$FIX/collision.pem" "$MODDIR/user10/$HASH.0"
 prepare_cert_store || fail 'owner-only preparation'
 [ "$(wc -l < "$MANIFEST")" -eq 1 ] || fail 'secondary user was imported into owner-only trust store'
 case "$(cat "$MANIFEST")" in *"$MODDIR/user10/"*) fail 'secondary user CA leaked into manifest' ;; esac
+snapshot_user_sources "$MODDIR/sources-before" || fail 'owner-only source snapshot'
 printf '\\nchanged' >> "$MODDIR/user10/$HASH.0"
+snapshot_user_sources "$MODDIR/sources-after" || fail 'owner-only source resnapshot'
+cmp -s "$MODDIR/sources-before" "$MODDIR/sources-after" || fail 'secondary user changed owner-only source snapshot'
 check_certificate_sources >/dev/null || fail 'excluded secondary user changed owner-only diagnostic'
-ok 'owner-only source scope excludes secondary users from import and diagnostics'
+printf '\\nchanged' >> "$MODDIR/user0/$HASH.0"
+snapshot_user_sources "$MODDIR/sources-after" || fail 'owner source resnapshot'
+if cmp -s "$MODDIR/sources-before" "$MODDIR/sources-after"; then fail 'owner CA change omitted from source snapshot'; fi
+if check_certificate_sources >/dev/null; then fail 'owner CA change omitted from diagnostic'; fi
+ok 'owner-only source scope excludes secondary users and detects owner changes'
 rm "$MODDIR/user0/$HASH.0" "$MODDIR/user10/$HASH.9"
 prepare_cert_store || fail 'fresh preparation'
 [ ! -e "$MODULE_CERT_DIR/$HASH.1" ] || fail 'removed input resurrected'
