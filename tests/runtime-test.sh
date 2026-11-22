@@ -51,7 +51,7 @@ printf '\\nchanged' >> "$MODDIR/user10/$HASH.0"
 snapshot_user_sources "$MODDIR/sources-after" || fail 'owner-only source resnapshot'
 cmp -s "$MODDIR/sources-before" "$MODDIR/sources-after" || fail 'secondary user changed owner-only source snapshot'
 check_certificate_sources >/dev/null || fail 'excluded secondary user changed owner-only diagnostic'
-printf '\\nchanged' >> "$MODDIR/user0/$HASH.0"
+cp "$FIX/native.pem" "$MODDIR/user0/$HASH.0"
 snapshot_user_sources "$MODDIR/sources-after" || fail 'owner source resnapshot'
 if cmp -s "$MODDIR/sources-before" "$MODDIR/sources-after"; then fail 'owner CA change omitted from source snapshot'; fi
 if check_certificate_sources >/dev/null; then fail 'owner CA change omitted from diagnostic'; fi
