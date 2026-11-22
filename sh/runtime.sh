@@ -82,10 +82,13 @@ file_digest() {
     printf '%s\n' "${output%% *}"
 }
 
+# A system-wide overlay must not implicitly import certificates from secondary
+# users or managed profiles. USER_CERT_DIRS is a test-only override; normal
+# runtime defaults to Android owner user 0.
 snapshot_user_sources() {
     local output="$1" user_dir input name origin owner digest
     : > "$output" || return 1
-    for user_dir in ${USER_CERT_DIRS:-/data/misc/user/*/cacerts-added} "$CUSTOM_CERT_DIR"; do
+    for user_dir in ${USER_CERT_DIRS:-/data/misc/user/0/cacerts-added} "$CUSTOM_CERT_DIR"; do
         [ -d "$user_dir" ] || continue
         origin=user
         [ "$user_dir" != "$CUSTOM_CERT_DIR" ] || origin=custom
@@ -174,7 +177,7 @@ prepare_cert_store() {
             remove_stage "$stage"; return 1
         }
     done
-    for user_dir in ${USER_CERT_DIRS:-/data/misc/user/*/cacerts-added} "$CUSTOM_CERT_DIR"; do
+    for user_dir in ${USER_CERT_DIRS:-/data/misc/user/0/cacerts-added} "$CUSTOM_CERT_DIR"; do
         [ -d "$user_dir" ] || continue
         origin=user
         [ "$user_dir" != "$CUSTOM_CERT_DIR" ] || origin=custom
@@ -286,7 +289,7 @@ check_certificate_sources() (
     trap 'rm -rf "$work"' EXIT
     changes=0
     unknown=0
-    for user_dir in ${USER_CERT_DIRS:-/data/misc/user/*/cacerts-added} "$CUSTOM_CERT_DIR"; do
+    for user_dir in ${USER_CERT_DIRS:-/data/misc/user/0/cacerts-added} "$CUSTOM_CERT_DIR"; do
         [ -d "$user_dir" ] || continue
         origin=user
         [ "$user_dir" != "$CUSTOM_CERT_DIR" ] || origin=custom
