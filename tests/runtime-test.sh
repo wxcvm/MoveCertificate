@@ -437,7 +437,16 @@ cp "$FIX/native.pem" "$SYSTEM_CERT_DIR/$HASH.0"
 printf hidden > "$SYSTEM_CERT_DIR/.unexpected"
 if validate_legacy_native_store; then fail 'hidden legacy entry was ignored'; fi
 rm -f "$SYSTEM_CERT_DIR/.unexpected"
-ok 'legacy preflight rejects extra, changed and hidden native entries'
+# Symlinks and an empty original legacy directory must not be treated as
+# safe-to-replace native stores, even if the target bytes match the APEX CA.
+rm -f "$SYSTEM_CERT_DIR/$HASH.0"
+ln -s "$APEX_CERT_DIR/$HASH.0" "$SYSTEM_CERT_DIR/$HASH.0"
+if validate_legacy_native_store; then fail 'symlinked legacy native CA accepted'; fi
+rm -f "$SYSTEM_CERT_DIR/$HASH.0"
+if validate_legacy_native_store; then fail 'empty legacy native CA store accepted'; fi
+cp "$FIX/native.pem" "$SYSTEM_CERT_DIR/$HASH.0"
+validate_legacy_native_store || fail 'restored original legacy CA rejected'
+ok 'legacy preflight rejects extra, changed, hidden, symlinked and empty native entries'
 
 # Android 17 device evidence: APEX contains two additional roots absent from
 # the byte-identical legacy subset. Use synthetic test file names and fixtures:
