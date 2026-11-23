@@ -66,7 +66,14 @@ prepare_cert_store || fail 'secondary-only preparation'
 [ "$(find "$MODULE_CERT_DIR" -type f | wc -l)" -eq 1 ] || fail 'secondary-only CA appeared in global store'
 cmp -s "$FIX/native.pem" "$MODULE_CERT_DIR/$HASH.0" || fail 'secondary-only case changed native CA bytes'
 ok 'secondary-only CA is excluded without changing native trust'
-rm "$MODDIR/user0/$HASH.0" "$MODDIR/user10/$HASH.9"
+# Start with a published owner CA, then remove its source. The preceding
+# secondary-only fixture must not make this cache-eviction check vacuous.
+setup
+USER_CERT_DIRS="$MODDIR/user0"
+cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+prepare_cert_store || fail 'cache-eviction initial preparation'
+[ -e "$MODULE_CERT_DIR/$HASH.1" ] || fail 'cache-eviction fixture did not import owner CA'
+rm "$MODDIR/user0/$HASH.0"
 prepare_cert_store || fail 'fresh preparation'
 [ ! -e "$MODULE_CERT_DIR/$HASH.1" ] || fail 'removed input resurrected'
 ok 'deleted input is not resurrected from the previous module cache'
