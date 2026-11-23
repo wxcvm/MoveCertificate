@@ -572,13 +572,13 @@ ok 'legacy mirror stays off when the official system store is already primary'
     [ "$LEGACY_COMPAT" = 0 ] && [ -z "$LEGACY_TARGET" ] || exit 1
     # Windows CRLF must not break an intentional opt-in, but whitespace and
     # blank-line additions must not turn ambiguous input into an opt-in.
-    printf 'legacy_compat=1\\r\\n' > "$MODDIR/legacy-ca.conf"
+    printf 'legacy_compat=1\r\n' > "$MODDIR/legacy-ca.conf"
     init_paths || exit 1
     [ "$LEGACY_COMPAT" = 1 ] && [ "$LEGACY_TARGET" = "$SYSTEM_CERT_DIR" ] || exit 1
-    printf ' legacy_compat=1\\n' > "$MODDIR/legacy-ca.conf"
+    printf ' legacy_compat=1\n' > "$MODDIR/legacy-ca.conf"
     init_paths || exit 1
     [ "$LEGACY_COMPAT" = 0 ] && [ -z "$LEGACY_TARGET" ] || exit 1
-    printf 'legacy_compat=1\\n\\n' > "$MODDIR/legacy-ca.conf"
+    printf 'legacy_compat=1\n\n' > "$MODDIR/legacy-ca.conf"
     init_paths || exit 1
     [ "$LEGACY_COMPAT" = 0 ] && [ -z "$LEGACY_TARGET" ] || exit 1
     printf 'legacy_compat=1\nlegacy_compat=0\n' > "$MODDIR/legacy-ca.conf"
