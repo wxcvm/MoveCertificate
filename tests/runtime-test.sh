@@ -56,6 +56,16 @@ snapshot_user_sources "$MODDIR/sources-after" || fail 'owner source resnapshot'
 if cmp -s "$MODDIR/sources-before" "$MODDIR/sources-after"; then fail 'owner CA change omitted from source snapshot'; fi
 if check_certificate_sources >/dev/null; then fail 'owner CA change omitted from diagnostic'; fi
 ok 'owner-only source scope excludes secondary users and detects owner changes'
+# A secondary user's CA must never become globally trusted when the owner
+# has no added CAs. This catches accidental wildcard source reintroduction.
+setup
+USER_CERT_DIRS="$MODDIR/user0"
+cp "$FIX/collision.pem" "$MODDIR/user10/$HASH.0"
+prepare_cert_store || fail 'secondary-only preparation'
+[ ! -s "$MANIFEST" ] || fail 'secondary-only CA appeared in global manifest'
+[ "$(find "$MODULE_CERT_DIR" -type f | wc -l)" -eq 1 ] || fail 'secondary-only CA appeared in global store'
+cmp -s "$FIX/native.pem" "$MODULE_CERT_DIR/$HASH.0" || fail 'secondary-only case changed native CA bytes'
+ok 'secondary-only CA is excluded without changing native trust'
 rm "$MODDIR/user0/$HASH.0" "$MODDIR/user10/$HASH.9"
 prepare_cert_store || fail 'fresh preparation'
 [ ! -e "$MODULE_CERT_DIR/$HASH.1" ] || fail 'removed input resurrected'
