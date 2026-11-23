@@ -16,6 +16,9 @@ umount() { echo "$*" >> "$TEST_ROOT/unmounts"; return 0; }
 pass=0
 ok() { pass=$((pass + 1)); printf 'ok %s - %s\n' "$pass" "$1"; }
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+# Activation is invoked as an executable during module startup. A lost Git mode
+# bit must fail CI rather than silently ship a non-runnable activation script.
+[ -x "$ROOT/sh/activate.sh" ] || fail 'activation script lost executable permission'
 HASH=$(cat "$FIX/subject-hash.txt")
 setup() {
     MODDIR="$TEST_ROOT/case-$pass"
