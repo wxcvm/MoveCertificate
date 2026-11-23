@@ -38,7 +38,7 @@ init_paths() {
         # blank lines or extra directives cannot silently enable the opt-in.
         value=$(tr -d '\r' < "$MODDIR/legacy-ca.conf"; printf '#') || return 1
         if [ "$value" = 'legacy_compat=1#' ] ||
-           [ "$value" = "$(printf 'legacy_compat=1\\n#')" ]; then
+           [ "$value" = "$(printf 'legacy_compat=1\n#')" ]; then
             LEGACY_COMPAT=1
             LEGACY_TARGET="$SYSTEM_CERT_DIR"
         fi
