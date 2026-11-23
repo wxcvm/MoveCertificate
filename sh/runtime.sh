@@ -34,8 +34,11 @@ init_paths() {
     if [ "$SDK" -ge 34 ] && [ "$SYSTEM_SOURCE" = "$APEX_CERT_DIR" ] &&
        [ -f "$MODDIR/legacy-ca.conf" ] && [ ! -L "$MODDIR/legacy-ca.conf" ]; then
         # Treat duplicate or unexpected directives as disabled, not as an opt-in.
-        value=$(tr -d '\r' < "$MODDIR/legacy-ca.conf") || return 1
-        if [ "$value" = 'legacy_compat=1' ]; then
+        # Command substitution strips trailing newlines. Append a sentinel so
+        # blank lines or extra directives cannot silently enable the opt-in.
+        value=$(tr -d '\r' < "$MODDIR/legacy-ca.conf"; printf '#') || return 1
+        if [ "$value" = 'legacy_compat=1#' ] ||
+           [ "$value" = "$(printf 'legacy_compat=1\\n#')" ]; then
             LEGACY_COMPAT=1
             LEGACY_TARGET="$SYSTEM_CERT_DIR"
         fi
