@@ -546,4 +546,26 @@ ok 'legacy opt-in is immutable for the current boot'
 ) || fail 'legacy mirror activated when AOSP selected system fallback'
 ok 'legacy mirror stays off when the official system store is already primary'
 
+# A fresh boot with the opt-in disabled must not inherit the previous boot's
+# legacy target. Reject malformed and symlinked configuration fail-closed.
+(
+    MODDIR="$TEST_ROOT/legacy-next-boot"; mkdir -p "$MODDIR"
+    getprop() { echo 37; }
+    select_system_source() { SYSTEM_SOURCE="$APEX_CERT_DIR"; }
+    printf 'legacy_compat=1\n' > "$MODDIR/legacy-ca.conf"
+    init_paths || exit 1
+    [ "$LEGACY_COMPAT" = 1 ] || exit 1
+    printf 'legacy_compat=0\n' > "$MODDIR/legacy-ca.conf"
+    init_paths || exit 1
+    [ "$LEGACY_COMPAT" = 0 ] && [ -z "$LEGACY_TARGET" ] || exit 1
+    printf 'legacy_compat=invalid\n' > "$MODDIR/legacy-ca.conf"
+    init_paths || exit 1
+    [ "$LEGACY_COMPAT" = 0 ] && [ -z "$LEGACY_TARGET" ] || exit 1
+    mv "$MODDIR/legacy-ca.conf" "$MODDIR/legacy-ca.real"
+    ln -s legacy-ca.real "$MODDIR/legacy-ca.conf"
+    init_paths || exit 1
+    [ "$LEGACY_COMPAT" = 0 ] && [ -z "$LEGACY_TARGET" ]
+) || fail 'disabled, invalid or symlinked legacy config enabled mirroring'
+ok 'new boot disables legacy mirror and malformed config fails closed'
+
 printf 'PASS: %s shell regression cases\n' "$pass"
