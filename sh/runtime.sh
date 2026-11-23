@@ -33,8 +33,9 @@ init_paths() {
     LEGACY_TARGET=''
     if [ "$SDK" -ge 34 ] && [ "$SYSTEM_SOURCE" = "$APEX_CERT_DIR" ] &&
        [ -f "$MODDIR/legacy-ca.conf" ] && [ ! -L "$MODDIR/legacy-ca.conf" ]; then
-        value=$(sed -n 's/^legacy_compat=//p' "$MODDIR/legacy-ca.conf" | head -n1 | tr -d '\r')
-        if [ "$value" = 1 ]; then
+        # Treat duplicate or unexpected directives as disabled, not as an opt-in.
+        value=$(tr -d '\r' < "$MODDIR/legacy-ca.conf") || return 1
+        if [ "$value" = 'legacy_compat=1' ]; then
             LEGACY_COMPAT=1
             LEGACY_TARGET="$SYSTEM_CERT_DIR"
         fi
