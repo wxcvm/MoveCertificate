@@ -36,7 +36,7 @@ init_paths() {
         # Treat duplicate or unexpected directives as disabled, not as an opt-in.
         # Command substitution strips trailing newlines. Append a sentinel so
         # blank lines or extra directives cannot silently enable the opt-in.
-        value=$(tr -d '\r' < "$MODDIR/legacy-ca.conf"; printf '#') || return 1
+        value=$(tr -d '\r' < "$MODDIR/legacy-ca.conf" && printf '#') || return 1
         if [ "$value" = 'legacy_compat=1#' ] ||
            [ "$value" = "$(printf 'legacy_compat=1\n#')" ]; then
             LEGACY_COMPAT=1
