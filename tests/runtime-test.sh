@@ -56,6 +56,30 @@ snapshot_user_sources "$MODDIR/sources-after" || fail 'owner source resnapshot'
 if cmp -s "$MODDIR/sources-before" "$MODDIR/sources-after"; then fail 'owner CA change omitted from source snapshot'; fi
 if check_certificate_sources >/dev/null; then fail 'owner CA change omitted from diagnostic'; fi
 ok 'owner-only source scope excludes secondary users and detects owner changes'
+# Exercise the production default without USER_CERT_DIRS. Redirect only the
+# hardcoded Android owner path to an isolated fixture in a sourced runtime copy.
+# This detects accidental wildcard expansion even if all three call sites
+# change together (which a static count cannot catch).
+(
+    setup
+    cp "$FIX/collision.pem" "$MODDIR/user10/$HASH.0"
+    sed "s@/data/misc/user/0/cacerts-added@$MODDIR/user0@g" "$ROOT/sh/runtime.sh" > "$MODDIR/runtime-default-fixture.sh" || exit 1
+    . "$MODDIR/runtime-default-fixture.sh"
+    unset USER_CERT_DIRS
+    prepare_cert_store || exit 1
+    [ ! -s "$MANIFEST" ] || exit 1
+    [ "$(find "$MODULE_CERT_DIR" -type f | wc -l)" -eq 1 ] || exit 1
+    snapshot_user_sources "$MODDIR/default-before" || exit 1
+    printf 'changed\\n' >> "$MODDIR/user10/$HASH.0"
+    snapshot_user_sources "$MODDIR/default-after" || exit 1
+    cmp -s "$MODDIR/default-before" "$MODDIR/default-after" || exit 1
+    check_certificate_sources >/dev/null || exit 1
+    cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+    snapshot_user_sources "$MODDIR/default-owner-added" || exit 1
+    cmp -s "$MODDIR/default-before" "$MODDIR/default-owner-added" && exit 1
+    exit 0
+) || fail 'production default owner scope'
+ok 'production default excludes secondary-user CAs across preparation and snapshots'
 # A secondary user's CA must never become globally trusted when the owner
 # has no added CAs. This catches accidental wildcard source reintroduction.
 setup
