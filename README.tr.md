@@ -3,6 +3,8 @@
 [English](README.en.md) | [中文](README.md)
 
 Kullanıcı CA sertifikalarını sistem deposuna ekleyen bir `Magisk/KernelSU/APatch` modülü. `Android 7-17` destekler. Bu depo yalnızca sertifika modülünü ve WebUI'yi içerir. Android 14+ genellikle etkin Conscrypt APEX deposunu kullanır. Yerleşik mod APEX destekleyen bir bağlama sağlayıcısı gerektirir; açılıştan sonra init ve zygote ad alanları doğrulanır. Doğrulama kapsamı için [FIXES.md](FIXES.md) dosyasına bakın.
+
+**Güven kapsamı değişikliği:** Modül, yalnızca Android ana kullanıcısının (kullanıcı 0) CA sertifikalarını ve açıkça sağlanan özel CA sertifikalarını sistem güven deposuna taşır. Sistem genelindeki güven birden fazla kullanıcıyı etkileyebilir. Diğer kullanıcıların ve iş profillerinin CA sertifikaları otomatik olarak taşınmaz veya silinmez. Önceki sürümler tüm kullanıcıların CA sertifikalarını içe aktarıyordu; güncelleme ve tam yeniden başlatma sonrasında depo yeni kapsamla oluşturulur. Yalnızca sistem genelinde güvenilmesine açıkça izin verdiğiniz CA sertifikalarını taşıyın.
 Eğer telefonunuz resmi bir imaja sahipse, bu modüle ihtiyacınız olabilir. Kendi ROM'unuzu derliyorsanız, sertifikayı doğrudan içine ekleyebilir veya `remount` kullanarak manuel olarak taşıyabilirsiniz.
 
 # Kullanım

@@ -1044,3 +1044,21 @@ li:last-child {
     font-weight: 500;
     color: var(--text-primary);
 }
+
+/* On-demand diagnostics: keep long certificate paths readable on phones. */
+#healthPids {
+    box-sizing: border-box;
+    width: 100%;
+    margin: 8px 0;
+    padding: 10px;
+    border: 1px solid var(--text-hint);
+    border-radius: 8px;
+    color: var(--text-primary);
+    background: var(--bg-card);
+}
+.health-output {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+    margin: 8px 0 0;
+}

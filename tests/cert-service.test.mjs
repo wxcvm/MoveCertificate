@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { stripTypeScriptTypes } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { executableTypeScript } from './vm-typescript.mjs';
 import vm from 'node:vm';
 import { webcrypto } from 'node:crypto';
 const source = readFileSync(new URL('../webdev/src/cert-service.ts', import.meta.url), 'utf8');
@@ -11,8 +12,9 @@ const other = 'b'.repeat(64);
 const row = (id = fingerprint, user = 0, state = 'pending') => `${id}\t12345678.1\t/data/misc/user/${user}/cacerts-added/12345678.0\t${state}`;
 function service(options = {}) {
     const calls = [];
+    const networkCalls = [];
     const files = {
-        'runtime.conf': `boot_id=boot\neffective_mode=compatible\nstate=${options.state ?? 'ready'}\nreason=none`,
+        'runtime.conf': `boot_id=boot\neffective_mode=compatible\nsystem_source=${options.source ?? (options.sdk && options.sdk < 34 ? '/system/etc/security/cacerts' : '/apex/com.android.conscrypt/cacerts')}\nstate=${options.state ?? 'ready'}\nreason=none`,
         'state/boot_id': 'boot', 'certificate-sources.tsv': options.manifest ?? row(),
         'cert_names.json': JSON.stringify({ [fingerprint]: 'Test CA', [other]: 'Other CA' }),
         'mode.conf': options.mode ?? 'mode=compatible', 'cert-selection.tsv': options.selections ?? '', ...options.files,
@@ -28,19 +30,23 @@ function service(options = {}) {
                 const key = Object.keys(files).find(k => command.includes('/' + k));
                 result.stdout = key && files[key] !== null ? files[key] : '__MISSING__';
             } else if (command.includes('cmp -s')) result.errno = options.cmpError ?? 0;
-            else if (command.includes('for d in')) result.stdout = '/data/misc/user/10/cacerts-added/87654321.0';
+            else if (command.includes('for d in')) result.stdout = '/data/misc/user/0/cacerts-added/87654321.0\n/data/misc/user/10/cacerts-added/87654321.0';
             else if (command.includes('set-mode.sh')) files['mode.conf'] = "mode=" + (command.endsWith("'builtin'") ? 'builtin' : 'compatible');
             else if (command.includes('set-cert-enabled.sh')) files['cert-selection.tsv'] = fingerprint + '\t' + (command.endsWith('1') ? '1' : '0');
             return result;
-        }, fetch: async () => ({ ok: true, json: async () => ({ result: 'Test CA' }) }),
+        }, fetch: async (...args) => { networkCalls.push(args); throw new Error('certificate lookup must be offline'); },
     });
-    const code = stripTypeScriptTypes(constants.replaceAll('export ', '') + '\n' + source
-        .replace(/^import .*?;\s*/gms, '').replaceAll('export ', ''));
-    vm.runInContext(code + '\nthis.api={getInstallCertResults,getRuntimeInfo,getCurrentMode,setMode,deleteCert,readFileBase64,getVersionInfo,setCertEnabled};', context);
-    return { api: context.api, calls };
+    vm.runInContext(executableTypeScript(constants), context, {
+        filename: fileURLToPath(new URL('../webdev/src/constants.ts', import.meta.url)),
+    });
+    vm.runInContext(executableTypeScript(source) + '\nthis.api={getInstallCertResults,getRuntimeInfo,getCurrentMode,setMode,deleteCert,readFileBase64,getVersionInfo,setCertEnabled,getHealthDiagnostic,getCertName};', context, {
+        filename: fileURLToPath(new URL('../webdev/src/cert-service.ts', import.meta.url)),
+    });
+    return { api: context.api, calls, networkCalls };
 }
-test('all user sources deduplicate by fingerprint, not subject filename', async () => {
-    const { api } = service({ manifest: [row(), row(fingerprint, 10), row(other, 11)].join('\n') });
+test('owner and custom sources deduplicate by fingerprint, not subject filename', async () => {
+    const custom = row().replace('/data/misc/user/0/cacerts-added/12345678.0', '/data/local/tmp/cert/example.pem');
+    const { api } = service({ manifest: [row(), custom, row(other)].join('\n') });
     const certs = await api.getInstallCertResults();
     assert.equal(certs.length, 2); assert.equal(certs[0].sources.length, 2); assert.equal(certs[0].id, fingerprint);
     assert.equal(certs[0].status, 'success');
@@ -60,10 +66,13 @@ test('previous boot status is not treated as active after safe mode', async () =
     assert.equal((await api.getRuntimeInfo()).effectiveMode, null);
     assert.equal((await api.getInstallCertResults())[0].status, 'unknown');
 });
-test('missing current manifest shows multi-user inputs as unknown and disables deletion', async () => {
-    const { api } = service({ files: { 'certificate-sources.tsv': null } });
+test('missing current manifest shows only owner inputs as unknown and disables deletion', async () => {
+    const { api, calls } = service({ files: { 'certificate-sources.tsv': null } });
     const certs = await api.getInstallCertResults();
-    assert.equal(certs[0].sources[0], '/data/misc/user/10/cacerts-added/87654321.0');
+    assert.equal(certs.length, 1);
+    assert.equal(certs[0].sources[0], '/data/misc/user/0/cacerts-added/87654321.0');
+    assert.ok(calls.some(c => c.includes('for d in /data/misc/user/0/cacerts-added;')));
+    assert.ok(!calls.some(c => c.includes('/data/misc/user/*/cacerts-added')));
     assert.equal(certs[0].status, 'unknown'); assert.equal(certs[0].canDelete, false);
 });
 test('policy exclusion and removed sources have distinct states', async () => {
@@ -71,6 +80,11 @@ test('policy exclusion and removed sources have distinct states', async () => {
         const cert = (await service({ manifest: row(fingerprint, 0, state) }).api.getInstallCertResults())[0];
         assert.equal(cert.status, state); assert.equal(cert.canDelete, state !== 'removed');
     }
+});
+test('out-of-scope secondary-user manifest is rejected without reading certificate contents', async () => {
+    const { api, calls } = service({ manifest: row(fingerprint, 10) });
+    await assert.rejects(api.getInstallCertResults());
+    assert.ok(!calls.some(c => c.includes('cmp -s') || c.includes('openssl x509')));
 });
 test('malformed source provenance is rejected', async () => {
     await assert.rejects(service({ manifest: row().replace('/data/misc/user/0/cacerts-added', '/system/etc/security/cacerts') }).api.getInstallCertResults());
@@ -127,4 +141,87 @@ test('selection writes use a dedicated helper and verify saved preferences', asy
 test('failed selection writes do not report success', async () => {
     const { api } = service({ exec: c => c.includes('set-cert-enabled.sh') ? { errno: 1, stderr: 'write failed', stdout: '' } : null });
     await assert.rejects(api.setCertEnabled(fingerprint, false), /write failed/);
+});
+
+test('Android 14+ runtime system fallback chooses the legacy path instead of SDK-based APEX', async () => {
+    const { api, calls } = service({ sdk: 37, source: '/system/etc/security/cacerts' });
+    const runtime = await api.getRuntimeInfo();
+    assert.equal(runtime.systemSource, '/system/etc/security/cacerts/');
+    assert.equal((await api.getInstallCertResults())[0].status, 'success');
+    assert.ok(calls.some(c => c.includes('cmp -s') && c.includes('/system/etc/security/cacerts/12345678.1')));
+    assert.ok(!calls.some(c => c.includes('cmp -s') && c.includes('/apex/com.android.conscrypt/cacerts/12345678.1')));
+});
+test('untrusted or absent runtime source never produces green or guessed red statuses', async () => {
+    for (const source of ['', '/system/etc/security/not-the-system-store']) {
+        const { api, calls } = service({ source });
+        const runtime = await api.getRuntimeInfo();
+        assert.equal(runtime.systemSource, null);
+        assert.equal((await api.getInstallCertResults())[0].status, 'unknown');
+        assert.ok(!calls.some(c => c.includes('cmp -s')));
+    }
+});
+test('stale boot snapshot never selects a system CA verification path', async () => {
+    const { api, calls } = service({
+        files: { 'runtime.conf': 'boot_id=old\neffective_mode=compatible\nsystem_source=/apex/com.android.conscrypt/cacerts\nstate=ready' },
+    });
+    assert.equal((await api.getRuntimeInfo()).systemSource, null);
+    assert.equal((await api.getInstallCertResults())[0].status, 'unknown');
+    assert.ok(!calls.some(c => c.includes('cmp -s')));
+});
+
+test('health diagnostic rejects shell syntax and malformed PIDs before execution', async () => {
+    const { api, calls } = service();
+    await assert.rejects(api.getHealthDiagnostic('123;id'), /Invalid PID/);
+    await assert.rejects(api.getHealthDiagnostic('1 0'), /Invalid PID/);
+    await assert.rejects(api.getHealthDiagnostic('-1'), /Invalid PID/);
+    assert.equal(calls.length, 0);
+});
+test('health diagnostic passes only validated PIDs and preserves command output', async () => {
+    const { api, calls } = service({
+        exec: command => command.includes('/sh/diagnose.sh')
+            ? { errno: 0, stdout: 'namespace_check_status=0', stderr: '' } : null,
+    });
+    const result = await api.getHealthDiagnostic('123 456');
+    assert.equal(result.status, 0);
+    assert.equal(result.output, 'namespace_check_status=0');
+    assert.ok(calls.some(command => command.endsWith("'123 456'") === false && command.endsWith('123 456')));
+});
+test('health diagnostic keeps nonzero status and stderr as actionable evidence', async () => {
+    const { api } = service({
+        exec: command => command.includes('/sh/diagnose.sh')
+            ? { errno: 2, stdout: 'source_check_status=2', stderr: 'reason=manifest_missing' } : null,
+    });
+    const result = await api.getHealthDiagnostic('');
+    assert.equal(result.status, 2);
+    assert.equal(result.output, 'source_check_status=2\nreason=manifest_missing');
+});
+
+test('certificate subject lookup remains on-device without uploading certificate bytes', async () => {
+    const { api, calls, networkCalls } = service({
+        exec: cmd => cmd.startsWith('openssl x509 -in ')
+            ? { errno: 0, stderr: '', stdout: 'subject=CN=Private Test CA,O=Example\n' } : null,
+    });
+    assert.equal(await api.getCertName('/data/misc/user/0/cacerts-added/12345678.0'), 'CN=Private Test CA,O=Example');
+    assert.equal(networkCalls.length, 0);
+    assert.ok(calls.some(cmd => cmd.startsWith('openssl x509 -in ')));
+    assert.ok(!calls.some(cmd => cmd.includes('curl ') || cmd.includes('https://')));
+});
+test('DER certificate subject is handled locally when the PEM parse fails', async () => {
+    const { api, calls, networkCalls } = service({
+        exec: cmd => cmd.startsWith('openssl x509 -in ')
+            ? { errno: 1, stdout: '', stderr: '' }
+            : cmd.startsWith('openssl x509 -inform DER ')
+                ? { errno: 0, stdout: 'subject=CN=DER CA', stderr: '' } : null,
+    });
+    assert.equal(await api.getCertName('/data/local/tmp/cert/example.der'), 'CN=DER CA');
+    assert.ok(calls.some(cmd => cmd.startsWith('openssl x509 -inform DER ')));
+    assert.equal(networkCalls.length, 0);
+});
+test('unavailable local X509 parser never falls back to a remote certificate service', async () => {
+    const { api, networkCalls } = service({
+        exec: cmd => cmd.startsWith('openssl x509 ')
+            ? { errno: 127, stdout: '', stderr: 'openssl: not found' } : null,
+    });
+    assert.equal(await api.getCertName('/data/local/tmp/cert/example.pem'), 'Unknown');
+    assert.equal(networkCalls.length, 0);
 });

@@ -9,7 +9,6 @@ getenforce() { echo Disabled; }
 chown() { return 0; }
 stat() {
     if [ "$1" = -c ] && [ "$2" = '%u' ]; then echo 0
-    elif [ "$1" = -c ] && [ "$2" = '%d:%i' ]; then command stat -L "$@"
     else command stat "$@"; fi
 }
 mount() { echo "$*" >> "$TEST_ROOT/mounts"; return 1; }
@@ -37,7 +36,68 @@ cmp -s "$SYSTEM_SOURCE/$HASH.0" "$MODULE_CERT_DIR/$HASH.0" || fail 'native overw
 [ "$(wc -l < "$MANIFEST")" -eq 2 ] || fail 'multi-user provenance'
 grep -q 'BEGIN CERTIFICATE' "$MODULE_CERT_DIR/$HASH.1" || fail 'PEM output required'
 ok 'colliding CA preserves native bytes; PEM/DER duplicates and all users recorded'
-rm "$MODDIR/user0/$HASH.0" "$MODDIR/user10/$HASH.9"
+# The production default is owner user 0; explicit fixture overrides exercise
+# the same source scope for preparation, snapshot and read-only diagnostics.
+[ "$(grep -Fc 'USER_CERT_DIRS:-/data/misc/user/0/cacerts-added' "$ROOT/sh/runtime.sh")" -eq 3 ] || fail 'source scope defaults differ across code paths'
+setup
+USER_CERT_DIRS="$MODDIR/user0"
+cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+cp "$FIX/collision.pem" "$MODDIR/user10/$HASH.0"
+prepare_cert_store || fail 'owner-only preparation'
+[ "$(wc -l < "$MANIFEST")" -eq 1 ] || fail 'secondary user was imported into owner-only trust store'
+case "$(cat "$MANIFEST")" in *"$MODDIR/user10/"*) fail 'secondary user CA leaked into manifest' ;; esac
+snapshot_user_sources "$MODDIR/sources-before" || fail 'owner-only source snapshot'
+printf '\\nchanged' >> "$MODDIR/user10/$HASH.0"
+snapshot_user_sources "$MODDIR/sources-after" || fail 'owner-only source resnapshot'
+cmp -s "$MODDIR/sources-before" "$MODDIR/sources-after" || fail 'secondary user changed owner-only source snapshot'
+check_certificate_sources >/dev/null || fail 'excluded secondary user changed owner-only diagnostic'
+cp "$FIX/native.pem" "$MODDIR/user0/$HASH.0"
+snapshot_user_sources "$MODDIR/sources-after" || fail 'owner source resnapshot'
+if cmp -s "$MODDIR/sources-before" "$MODDIR/sources-after"; then fail 'owner CA change omitted from source snapshot'; fi
+if check_certificate_sources >/dev/null; then fail 'owner CA change omitted from diagnostic'; fi
+ok 'owner-only source scope excludes secondary users and detects owner changes'
+# Exercise the production default without USER_CERT_DIRS. Redirect only the
+# hardcoded Android owner path to an isolated fixture in a sourced runtime copy.
+# This detects accidental wildcard expansion even if all three call sites
+# change together (which a static count cannot catch).
+(
+    setup
+    cp "$FIX/collision.pem" "$MODDIR/user10/$HASH.0"
+    sed "s@/data/misc/user/0/cacerts-added@$MODDIR/user0@g" "$ROOT/sh/runtime.sh" > "$MODDIR/runtime-default-fixture.sh" || exit 1
+    . "$MODDIR/runtime-default-fixture.sh"
+    unset USER_CERT_DIRS
+    prepare_cert_store || exit 1
+    [ ! -s "$MANIFEST" ] || exit 1
+    [ "$(find "$MODULE_CERT_DIR" -type f | wc -l)" -eq 1 ] || exit 1
+    snapshot_user_sources "$MODDIR/default-before" || exit 1
+    printf 'changed\\n' >> "$MODDIR/user10/$HASH.0"
+    snapshot_user_sources "$MODDIR/default-after" || exit 1
+    cmp -s "$MODDIR/default-before" "$MODDIR/default-after" || exit 1
+    check_certificate_sources >/dev/null || exit 1
+    cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+    snapshot_user_sources "$MODDIR/default-owner-added" || exit 1
+    cmp -s "$MODDIR/default-before" "$MODDIR/default-owner-added" && exit 1
+    exit 0
+) || fail 'production default owner scope'
+ok 'production default excludes secondary-user CAs across preparation and snapshots'
+# A secondary user's CA must never become globally trusted when the owner
+# has no added CAs. This catches accidental wildcard source reintroduction.
+setup
+USER_CERT_DIRS="$MODDIR/user0"
+cp "$FIX/collision.pem" "$MODDIR/user10/$HASH.0"
+prepare_cert_store || fail 'secondary-only preparation'
+[ ! -s "$MANIFEST" ] || fail 'secondary-only CA appeared in global manifest'
+[ "$(find "$MODULE_CERT_DIR" -type f | wc -l)" -eq 1 ] || fail 'secondary-only CA appeared in global store'
+cmp -s "$FIX/native.pem" "$MODULE_CERT_DIR/$HASH.0" || fail 'secondary-only case changed native CA bytes'
+ok 'secondary-only CA is excluded without changing native trust'
+# Start with a published owner CA, then remove its source. The preceding
+# secondary-only fixture must not make this cache-eviction check vacuous.
+setup
+USER_CERT_DIRS="$MODDIR/user0"
+cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+prepare_cert_store || fail 'cache-eviction initial preparation'
+[ -e "$MODULE_CERT_DIR/$HASH.1" ] || fail 'cache-eviction fixture did not import owner CA'
+rm "$MODDIR/user0/$HASH.0"
 prepare_cert_store || fail 'fresh preparation'
 [ ! -e "$MODULE_CERT_DIR/$HASH.1" ] || fail 'removed input resurrected'
 ok 'deleted input is not resurrected from the previous module cache'
@@ -146,6 +206,31 @@ ok 'actual toggle helper atomically saves next-boot selection without changing l
 ( set -- "$user_digest" 1; . "$TEST_ROOT/toggle-helper.sh" ) || fail 'helper re-enable'
 grep -q "^$user_digest$(printf '\t')1$" "$SELECTION_PATH" && [ "$(wc -l < "$SELECTION_PATH")" -eq 1 ] || fail 'helper appended conflicting duplicate choice'
 ok 'actual toggle helper replaces a prior choice rather than appending conflicts'
+# Exercise the deletion helper with isolated owner and secondary-user paths.
+setup
+mkdir -p "$MODDIR/state"
+printf '%s\n' "$BOOT_ID" > "$MODDIR/state/boot_id"
+cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+cp "$FIX/collision.pem" "$MODDIR/user10/$HASH.0"
+user_digest=$(file_digest "$MODDIR/user0/$HASH.0")
+sed '/^MODDIR=/d; /^\. "$MODDIR\/sh\/runtime.sh"/d; /^init_paths /d' "$ROOT/sh/delete-cert.sh" |
+    sed "s@/data/misc/user/0/cacerts-added@$MODDIR/user0@g; s@/data/local/tmp/cert@$MODDIR/custom@g" > "$TEST_ROOT/delete-helper.sh"
+printf '%s\t-\t%s\tunverified\n' "$user_digest" "$MODDIR/user0/$HASH.0" > "$MANIFEST"
+cp "$MANIFEST" "$MODDIR/owner-manifest"
+printf '%s\t-\t%s\tunverified\n' "$user_digest" "$MODDIR/user10/$HASH.0" >> "$MANIFEST"
+if ( set -- "$user_digest"; . "$TEST_ROOT/delete-helper.sh" ); then fail 'mixed-scope deletion accepted'; fi
+[ -f "$MODDIR/user0/$HASH.0" ] && [ -f "$MODDIR/user10/$HASH.0" ] || fail 'mixed-scope preflight deleted an input'
+ok 'mixed-scope deletion fails before any input is removed'
+cp "$MODDIR/owner-manifest" "$MANIFEST"
+printf 'old-boot\n' > "$MODDIR/state/boot_id"
+if ( set -- "$user_digest"; . "$TEST_ROOT/delete-helper.sh" ); then fail 'stale boot deletion accepted'; fi
+[ -f "$MODDIR/user0/$HASH.0" ] || fail 'stale boot deleted owner input'
+ok 'stale boot deletion leaves owner input intact'
+printf '%s\n' "$BOOT_ID" > "$MODDIR/state/boot_id"
+( set -- "$user_digest"; . "$TEST_ROOT/delete-helper.sh" ) || fail 'valid owner deletion'
+[ ! -e "$MODDIR/user0/$HASH.0" ] && [ -f "$MODDIR/user10/$HASH.0" ] || fail 'owner deletion scope incorrect'
+grep -q 'removed$' "$MANIFEST" || fail 'owner deletion did not update manifest'
+ok 'valid current-boot deletion removes only owner input'
 # Providers such as Mountify collect only module/system, including APEX.
 # Both layouts must contain the full set and only the currently active alias.
 for version in 34 37; do
@@ -183,4 +268,236 @@ for version in 34 37; do
     done
     ok "Android SDK $version builtin layouts preserve full CA contents and active aliases; provider result must verify"
 done
+# Separate active aliases can share the same APEX parent identity but have
+# different mounted certificate directories. Inject a failure on the second
+# bind and require the first bind to be undone, without unmounting the source.
+setup
+SDK=37
+APEX_CERT_DIR="$MODDIR/apex/com.android.conscrypt/cacerts"
+SYSTEM_SOURCE="$APEX_CERT_DIR"
+mkdir -p "$SYSTEM_SOURCE" "$MODDIR/apex/com.android.conscrypt@active/cacerts"
+cp "$FIX/native.pem" "$SYSTEM_SOURCE/$HASH.0"
+cp "$FIX/native.pem" "$MODDIR/apex/com.android.conscrypt@active/cacerts/$HASH.0"
+cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+prepare_cert_store || fail 'rollback preparation'
+rollback_alias="$MODDIR/apex/com.android.conscrypt@active/cacerts"
+rollback_ops="$MODDIR/rollback-ops"
+stat() {
+    case "$*" in
+        *'%d:%i'*'/com.android.conscrypt'|*'%d:%i'*'/com.android.conscrypt@active') echo '10:10' ;;
+        *'%u'*) echo 0 ;;
+        *) command stat "$@" ;;
+    esac
+}
+mount() {
+    printf 'bind %s\n' "$4" >> "$rollback_ops"
+    [ "$4" = "$SYSTEM_SOURCE" ] || return 1
+    command cp "$3"/* "$4/"
+}
+umount() {
+    printf 'unmount %s\n' "$1" >> "$rollback_ops"
+    rm -f "$1/$HASH.1"
+}
+if mount_in_current_namespace "$MODULE_CERT_DIR"; then fail 'second alias failure accepted'; fi
+[ "$(cat "$rollback_ops")" = "$(printf 'bind %s\nbind %s\nunmount %s' "$SYSTEM_SOURCE" "$rollback_alias" "$SYSTEM_SOURCE")" ] || fail 'rollback did not unwind only successful binds'
+[ ! -f "$SYSTEM_SOURCE/$HASH.1" ] && [ -f "$MODULE_CERT_DIR/$HASH.1" ] || fail 'rollback altered source or left partial mount'
+ok 'failed second APEX bind rolls back the first new bind'
+: > "$rollback_ops"
+printf 'stale' >> "$MODULE_CERT_DIR/$HASH.1"
+# A mismatched source must be rejected before any target is touched.
+mkdir -p "$MODDIR/partial"
+command cp "$MODULE_CERT_DIR/$HASH.0" "$MODDIR/partial/"
+if mount_in_current_namespace "$MODDIR/partial"; then fail 'partial mount source accepted'; fi
+[ ! -s "$rollback_ops" ] || fail 'partial source touched live mounts'
+ok 'partial source is rejected before binding'
+# Restore the standard fixture mocks for later cases.
+stat() {
+    if [ "$1" = -c ] && [ "$2" = '%u' ]; then echo 0
+    else command stat "$@"; fi
+}
+mount() { echo "$*" >> "$TEST_ROOT/mounts"; return 1; }
+umount() { echo "$*" >> "$TEST_ROOT/unmounts"; return 0; }
+
+# Compare canonical DER at the original input path, not just the hash filename.
+setup
+cp "$FIX/collision.pem" "$MODDIR/user0/$HASH.0"
+prepare_cert_store || fail 'diagnostic baseline'
+output=$(check_certificate_sources) || fail 'unchanged sources flagged'
+printf '%s\n' "$output" | grep -q '^source_changes=0 source_unverified=0$' || fail 'unchanged summary'
+base64 -d "$FIX/collision.b64" > "$MODDIR/user0/$HASH.0"
+check_certificate_sources >/dev/null || fail 'equivalent DER source flagged'
+ok 'source diagnostics recognize equivalent PEM and DER'
+cp "$FIX/native.pem" "$MODDIR/user0/$HASH.0"
+output=$(check_certificate_sources)
+[ "$?" -eq 1 ] && printf '%s\n' "$output" | grep -q 'source_status=changed' || fail 'replacement not detected'
+ok 'source diagnostics detect changed certificate at same path'
+cp "$FIX/collision.pem" "$MODDIR/user10/$HASH.2"
+output=$(check_certificate_sources)
+[ "$?" -eq 1 ] && printf '%s\n' "$output" | grep -q 'source_status=new' || fail 'new source not detected'
+rm "$MODDIR/user0/$HASH.0"
+output=$(check_certificate_sources)
+[ "$?" -eq 1 ] && printf '%s\n' "$output" | grep -q 'source_status=missing' || fail 'missing source not detected'
+[ -f "$MODULE_CERT_DIR/$HASH.1" ] || fail 'read-only diagnostic modified prepared store'
+ok 'source diagnostics identify new and missing inputs without modifying prepared store'
+printf 'not a certificate\n' > "$MODDIR/user10/$HASH.2"
+output=$(check_certificate_sources)
+[ "$?" -eq 2 ] && printf '%s\n' "$output" | grep -q 'source_status=unverified' || fail 'invalid source not detected'
+ok 'source diagnostics distinguish unreadable certificate from verified change'
+
+# Follow the actual AOSP Conscrypt source selection: APEX only when
+# available and nonempty on Android 14+; preserve the official fallback.
+setup
+SDK=37
+SYSTEM_CERT_DIR="$SYSTEM_SOURCE"
+APEX_CERT_DIR="$MODDIR/apex-test/cacerts"
+mkdir -p "$APEX_CERT_DIR"
+select_system_source
+[ "$SYSTEM_SOURCE" = "$SYSTEM_CERT_DIR" ] || fail 'empty APEX selected instead of system fallback'
+ok 'Android 14+ empty APEX directory selects the system fallback'
+cp "$FIX/native.pem" "$APEX_CERT_DIR/$HASH.0"
+select_system_source
+[ "$SYSTEM_SOURCE" = "$APEX_CERT_DIR" ] || fail 'populated Android 14+ APEX not preferred'
+ok 'Android 14+ populated APEX directory is the preferred trust store'
+SDK=33
+select_system_source
+[ "$SYSTEM_SOURCE" = "$SYSTEM_CERT_DIR" ] || fail 'pre-Android 14 selected APEX'
+ok 'pre-Android 14 uses the traditional system trust store'
+
+# When Android's APEX source is absent, builtin mode must not try to
+# prepare nonexistent APEX overlay aliases.
+setup
+SDK=37
+CURRENT_MODE=builtin
+SYSTEM_CERT_DIR="$SYSTEM_SOURCE"
+APEX_CERT_DIR="$MODDIR/missing-apex/cacerts"
+select_system_source
+prepare_cert_store && prepare_builtin || fail 'system fallback builtin preparation'
+verify_cert_mount "$MODDIR/system/etc/security/cacerts" builtin ||
+    fail 'system fallback builtin overlay missing'
+[ ! -d "$MODDIR/system/apex/com.android.conscrypt/cacerts" ] ||
+    fail 'APEX overlay generated while official source was unavailable'
+ok 'builtin system fallback does not generate stale APEX overlay'
+
+
+# The official Conscrypt source can appear or disappear across early boot
+# phases. Only the source used to prepare this boot may be verified later.
+setup
+SDK=37
+SYSTEM_CERT_DIR="$SYSTEM_SOURCE"
+APEX_CERT_DIR="$MODDIR/apex-source/cacerts"
+RUNTIME="$MODDIR/runtime.conf"
+CONFIGURED_MODE=compatible
+MODE_REASON=none
+mkdir -p "$APEX_CERT_DIR"
+select_system_source
+[ "$SYSTEM_SOURCE" = "$SYSTEM_CERT_DIR" ] || fail 'empty APEX should fall back'
+write_runtime prepared || fail 'system-source fallback snapshot'
+cp "$FIX/native.pem" "$APEX_CERT_DIR/$HASH.0"
+select_system_source
+if load_runtime_mode > "$MODDIR/drift.out" 2>&1; then
+    fail 'system-source drift from fallback to APEX accepted'
+fi
+grep -q 'reason=system_source_changed' "$MODDIR/drift.out" ||
+    fail 'source drift did not report a concrete reason'
+ok 'source changing from legacy to APEX fails closed, not falsely ready'
+rm "$APEX_CERT_DIR/$HASH.0"
+select_system_source
+load_runtime_mode || fail 'same boot legacy source snapshot rejected'
+ok 'stable fallback source matches its boot snapshot'
+
+# Test drift in the opposite direction (APEX temporarily disappears).
+cp "$FIX/native.pem" "$APEX_CERT_DIR/$HASH.0"
+select_system_source
+write_runtime prepared || fail 'APEX source snapshot'
+rm "$APEX_CERT_DIR/$HASH.0"
+select_system_source
+if load_runtime_mode > "$MODDIR/drift.out" 2>&1; then
+    fail 'system-source drift from APEX to fallback accepted'
+fi
+grep -q 'reason=system_source_changed' "$MODDIR/drift.out" ||
+    fail 'APEX disappearance lacked a concrete error'
+ok 'APEX disappearing during boot fails closed'
+printf 'system_source=/unexpected/untrusted/path\n' > "$MODDIR/invalid-source"
+sed '/^system_source=/d' "$RUNTIME" > "$MODDIR/runtime.copy"
+cat "$MODDIR/invalid-source" >> "$MODDIR/runtime.copy"
+mv "$MODDIR/runtime.copy" "$RUNTIME"
+if load_runtime_mode > "$MODDIR/drift.out" 2>&1; then
+    fail 'unexpected CA source accepted from runtime snapshot'
+fi
+grep -q 'reason=prepared_system_source_invalid' "$MODDIR/drift.out" ||
+    fail 'unsafe source had no diagnostic reason'
+ok 'runtime snapshot refuses an unexpected source path'
+
+
+# A newly added native CA during preparation must not be silently omitted,
+# even though all entries from the original listing still compare byte-wise.
+setup
+prepare_cert_store || fail 'baseline before native CA race'
+cp() {
+    command cp "$@" || return 1
+    if [ "$1" = -p ] && [ "$2" = "$SYSTEM_SOURCE/$HASH.0" ] &&
+       [ ! -e "$SYSTEM_SOURCE/$HASH.1" ]; then
+        command cp "$FIX/collision.pem" "$SYSTEM_SOURCE/$HASH.1" || return 1
+    fi
+}
+if prepare_cert_store; then
+    fail 'native certificate added mid-preparation was not detected'
+fi
+unset -f cp
+grep -q 'native certificate set changed during preparation' "$LOG_PATH" ||
+    fail 'new native certificate had no actionable diagnostic'
+[ -f "$MODULE_CERT_DIR/$HASH.0" ] &&
+    [ ! -e "$MODULE_CERT_DIR/$HASH.1" ] ||
+    fail 'failed CA race replaced last good prepared store'
+ok 'new native CA during staging causes atomic failure without losing last state'
+
+# User CA contents must remain stable across the preparation window.
+setup
+prepare_cert_store || fail 'baseline before user-source mutation race'
+base64 -d "$FIX/collision.b64" > "$MODDIR/user0/$HASH.0"
+cp() {
+    command cp "$@" || return 1
+    if [ "$1" = -f ] && [ "$2" = "$MODDIR/user0/$HASH.0" ]; then
+        command cp "$FIX/native.pem" "$MODDIR/user0/$HASH.0" || return 1
+    fi
+}
+if prepare_cert_store; then fail 'user CA mutation during preparation accepted'; fi
+unset -f cp
+grep -q 'user certificate sources changed during preparation' "$LOG_PATH" || fail 'user mutation lacked an actionable diagnostic'
+[ ! -e "$MODULE_CERT_DIR/$HASH.1" ] || fail 'changed user CA replaced last good state'
+ok 'user CA replacement during staging aborts atomically and preserves last good state'
+
+# A newly added user/profile CA during staging must not enter a partial snapshot.
+setup
+prepare_cert_store || fail 'baseline before user-source addition race'
+base64 -d "$FIX/collision.b64" > "$MODDIR/user0/$HASH.0"
+cp() {
+    command cp "$@" || return 1
+    if [ "$1" = -f ] && [ "$2" = "$MODDIR/user0/$HASH.0" ] && [ ! -e "$MODDIR/user10/$HASH.9" ]; then
+        base64 -d "$FIX/collision.b64" > "$MODDIR/user10/$HASH.9" || return 1
+    fi
+}
+if prepare_cert_store; then fail 'new user CA during preparation accepted'; fi
+unset -f cp
+grep -q 'user certificate sources changed during preparation' "$LOG_PATH" || fail 'user addition lacked an actionable diagnostic'
+[ ! -e "$MODULE_CERT_DIR/$HASH.1" ] || fail 'new user CA race replaced last good state'
+ok 'new user/profile CA during staging aborts atomically and preserves last good state'
+
+# Removing a source while another user CA is being staged must also abort.
+setup
+prepare_cert_store || fail 'baseline before user-source removal race'
+base64 -d "$FIX/collision.b64" > "$MODDIR/user0/$HASH.0"
+base64 -d "$FIX/collision.b64" > "$MODDIR/user10/$HASH.9"
+cp() {
+    command cp "$@" || return 1
+    if [ "$1" = -f ] && [ "$2" = "$MODDIR/user0/$HASH.0" ]; then
+        rm -f "$MODDIR/user10/$HASH.9" || return 1
+    fi
+}
+if prepare_cert_store; then fail 'removed user CA during preparation accepted'; fi
+unset -f cp
+grep -q 'user certificate sources changed during preparation' "$LOG_PATH" || fail 'user removal lacked an actionable diagnostic'
+[ ! -e "$MODULE_CERT_DIR/$HASH.1" ] || fail 'removed user CA race replaced last good state'
+ok 'removed user/profile CA during staging aborts atomically and preserves last good state'
+
 printf 'PASS: %s shell regression cases\n' "$pass"

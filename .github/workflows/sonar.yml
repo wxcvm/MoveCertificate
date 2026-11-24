@@ -32,8 +32,123 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@2f77a1ec69fb1d595b06f35ab27e97605bdef703 # v5
+      # The existing node:test cases execute the real TypeScript inside a VM.
+      # Node V8 coverage is converted back to the original TS source lines.
+      # No synthetic hits and no Quality Gate threshold overrides.
+      - name: Set up Node for real TS coverage
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+
+      - name: Execute tests and generate audited LCOV
+        run: |
+          set -euo pipefail
+          mkdir -p coverage/v8
+          NODE_V8_COVERAGE=coverage/v8 node --test tests/*.test.mjs
+          node tests/v8-coverage-to-lcov.mjs coverage/v8 coverage/lcov.info
+          test -s coverage/lcov.info
+          sed -n '/^SF:/p; /^LF:/p; /^LH:/p' coverage/lcov.info
+
+      - name: SonarCloud Scan and Quality Gate
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+        # Scanner upload succeeding does not imply the Quality Gate passed.
+        # Wait for SonarCloud's server-side result and fail this job on red.
+        with:
+          args: >-
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.timeout=300
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Explain Quality Gate failure
+        if: failure()
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -eu
+          if [ -z "${SONAR_TOKEN:-}" ]; then
+            echo 'SonarCloud diagnostics unavailable: SONAR_TOKEN is unset'
+            exit 0
+          fi
+          response=$(mktemp)
+          trap 'rm -f "$response"' EXIT
+          set -- --fail --silent --show-error --get \
+            --header "Authorization: Bearer $SONAR_TOKEN" \
+            --data-urlencode 'projectKey=wxcvm_MoveCertificate'
+          if [ -n "${PR_NUMBER:-}" ]; then
+            case "$PR_NUMBER" in
+              *[!0-9]*) echo 'Unexpected pull-request number'; exit 0 ;;
+            esac
+            set -- "$@" --data-urlencode "pullRequest=$PR_NUMBER"
+          fi
+          if curl "$@" 'https://sonarcloud.io/api/qualitygates/project_status' > "$response"; then
+            python3 - "$response" <<'PY'
+          import json
+          import sys
+          with open(sys.argv[1], encoding='utf-8') as handle:
+              report = json.load(handle).get('projectStatus', {})
+          print('SonarCloud Quality Gate:', report.get('status', 'unavailable'))
+          for condition in report.get('conditions', []):
+              if condition.get('status') != 'OK':
+                  print('Failed metric:', condition.get('metricKey'),
+                        'status:', condition.get('status'),
+                        'actual:', condition.get('actualValue', 'n/a'),
+                        'threshold:', condition.get('errorThreshold', 'n/a'))
+          PY
+          else
+            echo 'SonarCloud Quality Gate detail API unavailable; see SonarCloud dashboard'
+          fi
+          # Print genuine new-line and new-branch coverage separately, so
+          # missing branch instrumentation cannot hide behind an aggregate.
+          metrics=$(mktemp)
+          trap 'rm -f "$response" "$metrics"' EXIT
+          set -- --fail --silent --show-error --get \
+            --header "Authorization: Bearer $SONAR_TOKEN" \
+            --data-urlencode 'component=wxcvm_MoveCertificate' \
+            --data-urlencode 'metricKeys=new_coverage,new_line_coverage,new_branch_coverage,new_lines_to_cover,new_uncovered_lines,new_conditions_to_cover,new_uncovered_conditions'
+          if [ -n "${PR_NUMBER:-}" ]; then set -- "$@" --data-urlencode "pullRequest=$PR_NUMBER"; fi
+          if curl "$@" 'https://sonarcloud.io/api/measures/component' > "$metrics"; then
+            python3 - "$metrics" <<'PY'
+          import json
+          import sys
+          with open(sys.argv[1], encoding='utf-8') as handle:
+              data = json.load(handle)
+          for metric in data.get('component', {}).get('measures', []):
+              current = metric.get('value', 'n/a')
+              period = metric.get('period', {}).get('value', 'n/a')
+              print('Coverage metric:', metric.get('metric'), 'value:', current,
+                    'new-code period:', period)
+          PY
+          else
+            echo 'SonarCloud coverage metrics API unavailable'
+          fi
+          # Per-file new-code coverage is needed to choose meaningful tests.
+          files=$(mktemp)
+          trap 'rm -f "$response" "$metrics" "$files"' EXIT
+          set -- --fail --silent --show-error --get \
+            --header "Authorization: Bearer $SONAR_TOKEN" \
+            --data-urlencode 'component=wxcvm_MoveCertificate' \
+            --data-urlencode 'metricKeys=new_coverage,new_line_coverage,new_branch_coverage,new_lines_to_cover,new_uncovered_lines,new_conditions_to_cover,new_uncovered_conditions' \
+            --data-urlencode 'qualifiers=FIL' \
+            --data-urlencode 'ps=500'
+          if [ -n "${PR_NUMBER:-}" ]; then set -- "$@" --data-urlencode "pullRequest=$PR_NUMBER"; fi
+          if curl "$@" 'https://sonarcloud.io/api/measures/component_tree' > "$files"; then
+            python3 - "$files" <<'PY'
+          import json
+          import sys
+          with open(sys.argv[1], encoding='utf-8') as handle:
+              data = json.load(handle)
+          for component in data.get('components', []):
+              measures = []
+              for metric in component.get('measures', []):
+                  value = metric.get('period', {}).get('value', metric.get('value', 'n/a'))
+                  measures.append(f"{metric.get('metric')}={value}")
+              if measures:
+                  print('Coverage file:', component.get('path', component.get('key')),
+                        ' '.join(measures))
+          PY
+          else
+            echo 'SonarCloud per-file coverage API unavailable'
+          fi
