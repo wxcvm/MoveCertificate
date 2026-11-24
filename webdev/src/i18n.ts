@@ -41,7 +41,7 @@ const translations: Record<string, TranslationEntry> = {
     healthError: { 'zh-CN': '诊断执行失败，请检查 PID 或 Root 权限', en: 'Diagnostic failed; check PIDs or root access', tr: 'Tanılama başarısız; PID veya root erişimini denetleyin' },
     mountCertificate: { 'zh-CN': '挂载', en: 'Mount', tr: 'Bağla' },
     mountPendingReboot: { 'zh-CN': '待重启', en: 'Reboot pending', tr: 'Yeniden başlatma bekliyor' },
-    mountSelectionHint: { 'zh-CN': '勾选后在下次启动挂载；取消仅跳过迁移，保留用户证书。', en: 'Apply on next boot. Unchecking keeps the user certificate and skips migration.', tr: 'Sonraki açılışta uygulanır. Kaldırmak kullanıcı sertifikasını silmez.' },
+    mountSelectionHint: { 'zh-CN': '仅迁移主用户（用户 0）和自定义 CA；不会迁移其他用户或工作资料的 CA。勾选后重启生效，取消不会删除原证书。', en: 'Only owner (user 0) and custom CAs are migrated; secondary-user and work-profile CAs are excluded. Changes apply on reboot. Unchecking preserves the input.', tr: 'Yalnızca ana kullanıcı (kullanıcı 0) ve özel CA sertifikaları taşınır; diğer kullanıcıların ve iş profillerinin CA sertifikaları hariç tutulur. Değişiklikler yeniden başlatınca uygulanır. Seçimi kaldırmak kaynak sertifikayı silmez.' },
     mountSelectionSaved: { 'zh-CN': '已保存挂载选择，重启后生效；原证书已保留', en: 'Mount selection saved; reboot required. Input preserved.', tr: 'Bağlama seçimi kaydedildi; yeniden başlatma gerekli. Kaynak korundu.' },
     mountSelectionFailed: { 'zh-CN': '保存挂载选择失败', en: 'Could not save mount selection', tr: 'Bağlama seçimi kaydedilemedi' },
     status_disabled: { 'zh-CN': '本次启动未挂载，原用户证书保留', en: 'Migration disabled this boot; user certificate preserved', tr: 'Bu açılışta taşıma kapalı; kullanıcı sertifikası korundu' },
