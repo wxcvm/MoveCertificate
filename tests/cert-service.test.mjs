@@ -30,7 +30,7 @@ function service(options = {}) {
                 const key = Object.keys(files).find(k => command.includes('/' + k));
                 result.stdout = key && files[key] !== null ? files[key] : '__MISSING__';
             } else if (command.includes('cmp -s')) result.errno = options.cmpError ?? 0;
-            else if (command.includes('for d in')) result.stdout = '/data/misc/user/10/cacerts-added/87654321.0';
+            else if (command.includes('for d in')) result.stdout = '/data/misc/user/0/cacerts-added/87654321.0\n/data/misc/user/10/cacerts-added/87654321.0';
             else if (command.includes('set-mode.sh')) files['mode.conf'] = "mode=" + (command.endsWith("'builtin'") ? 'builtin' : 'compatible');
             else if (command.includes('set-cert-enabled.sh')) files['cert-selection.tsv'] = fingerprint + '\t' + (command.endsWith('1') ? '1' : '0');
             return result;
@@ -44,8 +44,9 @@ function service(options = {}) {
     });
     return { api: context.api, calls, networkCalls };
 }
-test('all user sources deduplicate by fingerprint, not subject filename', async () => {
-    const { api } = service({ manifest: [row(), row(fingerprint, 10), row(other, 11)].join('\n') });
+test('owner and custom sources deduplicate by fingerprint, not subject filename', async () => {
+    const custom = row().replace('/data/misc/user/0/cacerts-added/12345678.0', '/data/local/tmp/cert/example.pem');
+    const { api } = service({ manifest: [row(), custom, row(other)].join('\n') });
     const certs = await api.getInstallCertResults();
     assert.equal(certs.length, 2); assert.equal(certs[0].sources.length, 2); assert.equal(certs[0].id, fingerprint);
     assert.equal(certs[0].status, 'success');
@@ -65,10 +66,13 @@ test('previous boot status is not treated as active after safe mode', async () =
     assert.equal((await api.getRuntimeInfo()).effectiveMode, null);
     assert.equal((await api.getInstallCertResults())[0].status, 'unknown');
 });
-test('missing current manifest shows multi-user inputs as unknown and disables deletion', async () => {
-    const { api } = service({ files: { 'certificate-sources.tsv': null } });
+test('missing current manifest shows only owner inputs as unknown and disables deletion', async () => {
+    const { api, calls } = service({ files: { 'certificate-sources.tsv': null } });
     const certs = await api.getInstallCertResults();
-    assert.equal(certs[0].sources[0], '/data/misc/user/10/cacerts-added/87654321.0');
+    assert.equal(certs.length, 1);
+    assert.equal(certs[0].sources[0], '/data/misc/user/0/cacerts-added/87654321.0');
+    assert.ok(calls.some(c => c.includes('for d in /data/misc/user/0/cacerts-added;')));
+    assert.ok(!calls.some(c => c.includes('/data/misc/user/*/cacerts-added')));
     assert.equal(certs[0].status, 'unknown'); assert.equal(certs[0].canDelete, false);
 });
 test('policy exclusion and removed sources have distinct states', async () => {
@@ -76,6 +80,11 @@ test('policy exclusion and removed sources have distinct states', async () => {
         const cert = (await service({ manifest: row(fingerprint, 0, state) }).api.getInstallCertResults())[0];
         assert.equal(cert.status, state); assert.equal(cert.canDelete, state !== 'removed');
     }
+});
+test('out-of-scope secondary-user manifest is rejected without reading certificate contents', async () => {
+    const { api, calls } = service({ manifest: row(fingerprint, 10) });
+    await assert.rejects(api.getInstallCertResults());
+    assert.ok(!calls.some(c => c.includes('cmp -s') || c.includes('openssl x509')));
 });
 test('malformed source provenance is rejected', async () => {
     await assert.rejects(service({ manifest: row().replace('/data/misc/user/0/cacerts-added', '/system/etc/security/cacerts') }).api.getInstallCertResults());
