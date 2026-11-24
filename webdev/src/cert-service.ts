@@ -104,7 +104,7 @@ function parseManifest(data: string): SourceRow[] {
         const [fingerprint, target, source, state] = line.split('\t');
         if (!fingerprint || !/^[0-9a-f]{64}$/.test(fingerprint) || !target ||
             (target !== '-' && !/^[0-9a-f]{8}\.[0-9]+$/.test(target)) || !source ||
-            !/^\/data\/misc\/user\/\d+\/cacerts-added\/[0-9a-f]{8}\.\d+$|^\/data\/local\/tmp\/cert\/[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(source) ||
+            !/^\/data\/misc\/user\/0\/cacerts-added\/[0-9a-f]{8}\.\d+$|^\/data\/local\/tmp\/cert\/[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(source) ||
             !state || !['pending', 'excluded', 'disabled', 'native', 'unverified', 'removed'].includes(state)) {
             throw new Error('证书来源记录损坏，请重启后重试');
         }
@@ -115,9 +115,9 @@ export async function getInstallCertResults(): Promise<CertEntry[]> {
     const runtime = await getRuntimeInfo();
     const [stateBoot, data] = await Promise.all([optionalFile(STATE_BOOT_PATH), optionalFile(MANIFEST_PATH)]);
     if (stateBoot !== runtime.bootId || data === null) {
-        // Show every user's inputs while making unavailable boot verification explicit.
-        const inputList = await run("for d in /data/misc/user/*/cacerts-added; do [ ! -d \"$d\" ] || find \"$d\" -maxdepth 1 -type f; done");
-        return inputList.split('\n').filter(path => /\/cacerts-added\/[0-9a-f]{8}\.\d+$/.test(path)).map(path => ({
+        // Match the runtime's owner-only trust scope even before boot verification.
+        const inputList = await run("for d in /data/misc/user/0/cacerts-added; do [ ! -d \"$d\" ] || find \"$d\" -maxdepth 1 -type f; done");
+        return inputList.split('\n').filter(path => /^\/data\/misc\/user\/0\/cacerts-added\/[0-9a-f]{8}\.\d+$/.test(path)).map(path => ({
             id: '', filename: path.split('/').pop()!, name: path.split('/').pop()!,
             status: 'unknown', sources: [path], canDelete: false, enabled: false, canToggle: false, pendingChange: false,
         }));
