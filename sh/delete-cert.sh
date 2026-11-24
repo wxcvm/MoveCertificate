@@ -8,13 +8,14 @@ printf '%s\n' "$digest" | grep -Eq '^[0-9a-f]{64}$' || exit 1
 # Serialize deletion against preparation. Only input copies are removed; native
 # CAs and live mounts are left intact until reboot.
 lock_state || exit 1
+[ "$(cat "$MODDIR/state/boot_id" 2>/dev/null)" = "$BOOT_ID" ] || exit 1
 work=$(mktemp -d "$MODDIR/.stage.XXXXXX") || exit 1
 trap 'remove_stage "$work"' EXIT
 awk -F '\t' -v d="$digest" '$1 == d' "$MANIFEST" > "$work/rows"
 [ -s "$work/rows" ] || exit 1
 result=0
 while IFS="$(printf '\t')" read -r fingerprint target source status; do
-    printf '%s\n' "$source" | grep -Eq '^/data/misc/user/[0-9]+/cacerts-added/[0-9a-f]{8}\.[0-9]+$|^/data/local/tmp/cert/[A-Za-z0-9][A-Za-z0-9_.-]*$' || { result=1; continue; }
+    printf '%s\n' "$source" | grep -Eq '^/data/misc/user/0/cacerts-added/[0-9a-f]{8}\.[0-9]+$|^/data/local/tmp/cert/[A-Za-z0-9][A-Za-z0-9_.-]*$' || { result=1; continue; }
     [ ! -L "$source" ] || { result=1; continue; }
     [ -e "$source" ] || continue
     origin=user
